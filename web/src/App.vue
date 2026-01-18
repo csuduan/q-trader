@@ -37,7 +37,7 @@
     </el-aside>
 
     <!-- 主体内容 -->
-    <el-container>
+    <el-container class="main-container">
       <!-- 顶部栏 -->
       <el-header class="header">
         <div class="header-left">
@@ -103,8 +103,8 @@ onUnmounted(() => {
 
 .app-container {
   height: 100vh;
-  width: 100%;
-  min-width: 1200px;
+  width: 100vw;
+  display: flex;
 }
 
 .sidebar {
@@ -133,6 +133,11 @@ onUnmounted(() => {
 
 .nav-menu {
   border-right: none;
+}
+
+.main-container {
+  flex: 1;
+  min-width: 0;
 }
 
 .header {
@@ -175,7 +180,6 @@ onUnmounted(() => {
 
 .main-content {
   background-color: #f0f2f5;
-  width: 100%;
   height: calc(100vh - 60px);
   overflow: auto;
 }

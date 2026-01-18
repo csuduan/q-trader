@@ -224,7 +224,6 @@ async function loadHistory() {
     const history = await logApi.getLogHistory(0, 100)
     logs.value = [...history].reverse()
     isUserScrolled.value = false
-    ElMessage.success(`加载了 ${history.length} 条历史日志`)
     if (autoScroll.value) {
       await nextTick()
       scrollToBottom()

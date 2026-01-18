@@ -138,8 +138,8 @@
       </el-tab-pane>
 
       <el-tab-pane label="账户交易" name="trading">
-        <el-row :gutter="20">
-          <el-col :span="7.2">
+        <el-row :gutter="20" style="display: flex; flex-wrap: nowrap;">
+          <el-col :span="6" style="flex: 0 0 auto; min-width: 350px;">
             <el-card shadow="hover">
               <template #header>
                 <div class="card-header">
@@ -196,7 +196,7 @@
             </el-card>
           </el-col>
 
-          <el-col :span="16.8">
+          <el-col :span="18" style="flex: 1; min-width: 0;">
             <el-card shadow="hover">
               <template #header>
                 <div class="card-header">
@@ -214,16 +214,6 @@
                       <el-icon><Refresh /></el-icon>
                       刷新
                     </el-button>
-                    <el-button
-                      type="danger"
-                      @click="handleCancelSelected"
-                      :loading="cancelling"
-                      :disabled="selectedOrders.length === 0"
-                      v-if="orderTab === 'PENDING'"
-                    >
-                      <el-icon><Delete /></el-icon>
-                      撤销选中 ({{ selectedOrders.length }})
-                    </el-button>
                   </el-space>
                 </div>
               </template>
@@ -236,11 +226,6 @@
                 table-layout="fixed"
                 @selection-change="handleOrderSelectionChange"
               >
-                <el-table-column
-                  v-if="orderTab === 'PENDING'"
-                  type="selection"
-                  width="55"
-                />
                 <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
                 <el-table-column prop="symbol" label="合约" width="120" />
                 <el-table-column prop="direction" label="方向" width="80">
@@ -258,7 +243,6 @@
                     {{ row.limit_price ? formatNumber(row.limit_price) : '市价' }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="price_type" label="价格类型" width="100" />
                 <el-table-column prop="status" label="状态" width="100">
                   <template #default="{ row }">
                     <el-tag :type="getStatusType(row.status)" size="small">
@@ -418,7 +402,7 @@
     <el-dialog v-model="showOrderInputDialog" title="报单" width="500px">
       <el-form :model="orderForm" label-width="100px">
         <el-form-item label="合约代码">
-          <el-input v-model="orderForm.symbol" placeholder="如 SHFE.rb2505" />
+          <el-input v-model="orderForm.symbol" placeholder="如: rb2605" />
         </el-form-item>
         <el-form-item label="买卖方向">
           <el-radio-group v-model="orderForm.direction">
