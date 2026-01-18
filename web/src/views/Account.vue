@@ -14,7 +14,7 @@
           </template>
 
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="账户ID">{{ store.account.account_id }}</el-descriptions-item>
+            <el-descriptions-item label="账户ID">{{ store.account.user_id || '-'}}</el-descriptions-item>
             <el-descriptions-item label="券商">{{ store.account.broker_name || '-' }}</el-descriptions-item>
             <el-descriptions-item label="币种">{{ store.account.currency }}</el-descriptions-item>
             <el-descriptions-item label="风险率">

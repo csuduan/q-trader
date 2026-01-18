@@ -151,3 +151,23 @@ class AlarmStatsRes(BaseModel):
     unconfirmed: int
     last_hour: int
     last_five_minutes: int
+
+
+class SystemParamRes(BaseModel):
+    """系统参数响应"""
+    id: int
+    param_key: str
+    param_value: str | None
+    param_type: str
+    description: str | None
+    group: str
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SystemParamUpdateReq(BaseModel):
+    """系统参数更新请求"""
+    param_key: str
+    param_value: str

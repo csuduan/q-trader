@@ -41,6 +41,12 @@ class Database:
         Base.metadata.drop_all(bind=self.engine)
         logger.warning("数据库表已删除")
 
+    def drop_and_recreate(self) -> None:
+        """删除并重新创建所有数据表（慎用）"""
+        self.drop_tables()
+        self.create_tables()
+        logger.warning("数据库表已重建")
+
     @contextmanager
     def get_session(self) -> Generator[Session, None, None]:
         """

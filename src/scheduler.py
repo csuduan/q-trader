@@ -70,6 +70,7 @@ class TaskScheduler:
             ]
 
         try:
+            new_jobs_count = 0
             for job_config in default_jobs:
                 existing_job = session.query(JobModel).filter_by(job_id=job_config["job_id"]).first()
                 if not existing_job:
@@ -83,19 +84,12 @@ class TaskScheduler:
                         enabled=job_config["enabled"],
                     )
                     session.add(job)
+                    new_jobs_count += 1
                     logger.info(f"已创建任务配置: {job_config['job_name']}")
-                else:
-                    # 更新现有任务配置（从config.yaml同步）
-                    existing_job.job_name = job_config["job_name"]
-                    existing_job.job_group = job_config["job_group"]
-                    existing_job.job_description = job_config["job_description"]
-                    existing_job.cron_expression = job_config["cron_expression"]
-                    existing_job.job_method = job_config["job_method"]
-                    existing_job.enabled = job_config["enabled"]
-                    session.merge(existing_job)
 
             session.commit()
-            logger.info(f"已从配置文件同步 {len(default_jobs)} 个任务配置到数据库")
+            if new_jobs_count > 0:
+                logger.info(f"已从配置文件同步 {new_jobs_count} 个新任务配置到数据库")
         except Exception as e:
             logger.error(f"初始化任务配置到数据库失败: {e}")
             session.rollback()

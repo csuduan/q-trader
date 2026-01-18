@@ -118,8 +118,8 @@ class AppConfig(BaseModel):
     @field_validator("account_type")
     @classmethod
     def validate_account_type(cls, v: str) -> str:
-        if v not in ("kq", "sim", "account"):
-            raise ValueError("账户类型必须是 kq, sim 或 account")
+        if v not in ("kq", "real"):
+            raise ValueError("账户类型必须是 kq, real")
         return v
 
 

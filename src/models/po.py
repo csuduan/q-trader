@@ -221,3 +221,19 @@ class AlarmPo(Base):
 
     def __repr__(self):
         return f"<AlarmPo(account_id={self.account_id}, title={self.title}, status={self.status})>"
+
+
+class SystemParamPo(Base):
+    """系统参数表"""
+    __tablename__ = "system_params"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    param_key = Column(String(100), unique=True, nullable=False, index=True)
+    param_value = Column(Text, nullable=True)
+    param_type = Column(String(20), nullable=False, default="string")
+    description = Column(Text, nullable=True)
+    group = Column(String(50), nullable=False, default="general")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<SystemParamPo(key={self.param_key}, type={self.param_type}, value={self.param_value})>"

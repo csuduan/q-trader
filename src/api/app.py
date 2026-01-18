@@ -20,6 +20,7 @@ from src.api.routes.position import router as position_router
 from src.api.routes.quote import router as quote_router
 from src.api.routes.rotation import router as rotation_router
 from src.api.routes.system import router as system_router
+from src.api.routes.system_params import router as system_params_router
 from src.api.routes.trade import router as trade_router
 from src.api.schemas import AccountRes, OrderRes, PositionRes, TradeRes
 from src.api.responses import (
@@ -98,6 +99,7 @@ def create_app(config=None) -> FastAPI:
     app.include_router(rotation_router)
     app.include_router(system_router)
     app.include_router(alarm_router)
+    app.include_router(system_params_router)
 
     @app.on_event("startup")
     async def startup_event():

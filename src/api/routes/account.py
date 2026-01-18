@@ -52,7 +52,7 @@ async def get_account_info(engine = Depends(get_trading_engine)):
 
         return success_response(
             data=AccountRes(
-                account_id="-" if not user_id else user_id,
+                account_id="-" if not engine.account_id else engine.account_id,
                 broker_name=account.get("broker_name", ""),
                 currency=account.get("currency", "CNY"),
                 balance=float(account.get("balance", 0)),

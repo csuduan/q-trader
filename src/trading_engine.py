@@ -50,13 +50,41 @@ class TradingEngine:
         self.orders: Dict[str, Order] = {}
         self.trades: Dict[str, Trade] = {}
 
-        # 风控模块
+        # 风控模块（使用配置文件中的默认值，启动后会从数据库加载）
         self.risk_control = RiskControl(config.risk_control)
 
         # 事件引擎
         self.event_engine = event_engine
 
         logger.info(f"交易引擎初始化完成，账户类型: {config.account_type}")
+
+    def reload_risk_control_config(self):
+        """
+        从数据库重新加载风控配置
+        """
+        try:
+            from src.param_loader import load_risk_control_config
+            new_config = load_risk_control_config()
+            self.risk_control.config = new_config
+            logger.info("风控配置已从数据库重新加载")
+        except Exception as e:
+            logger.error(f"重新加载风控配置失败: {e}", exc_info=True)
+
+    def _load_risk_control_config(self):
+        """
+        加载风控配置
+
+        优先从数据库加载，如果数据库中没有，则使用配置文件中的默认值
+
+        Returns:
+            RiskControlConfig: 风控配置对象
+        """
+        try:
+            from src.param_loader import load_risk_control_config
+            return load_risk_control_config()
+        except Exception as e:
+            logger.warning(f"从数据库加载风控配置失败: {e}，使用配置文件默认值")
+            return self.config.risk_control
 
     def connect(self) -> bool:
         """
@@ -75,11 +103,7 @@ class TradingEngine:
                 # 快期模拟账户
                 account = TqKq()
                 logger.info("使用快期模拟账户连接")
-            elif self.config.account_type == "sim":
-                # 本地模拟账户
-                account = TqSim()
-                logger.info("使用本地模拟账户连接")
-            else:  # account_type == "account"
+            elif self.config.account_type == "real" :
                 # 实盘账户
                 if not self.config.trading_account:
                     raise ValueError("实盘账户需要配置 trading_account")
@@ -89,7 +113,9 @@ class TradingEngine:
                     self.config.trading_account.user_id,
                     self.config.trading_account.password,
                 )
-                logger.info(f"使用实盘账户连接: {self.config.trading_account.broker_name}")
+                logger.info(f"使用实盘账户连接: {self.config.trading_account.user_id} {self.config.trading_account.broker_name}")
+            else :
+                raise ValueError(f"未知账户类型: {self.config.account_type}")
 
             # 创建TqApi实例
             self.api = TqApi(account, auth=self.auth, web_gui=False)
@@ -117,6 +143,10 @@ class TradingEngine:
 
             # 根据orders列表初始化当日已发送的报单次数和撤单次数
             self._init_risk_counts_from_orders()
+
+            # 从数据库重新加载风控配置
+            logger.info("正在从数据库加载风控配置...")
+            self.reload_risk_control_config()
 
             # 查询合约信息
             list = self.api.query_quotes(ins_class=["FUTURE"],expired=False)
