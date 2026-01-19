@@ -79,8 +79,8 @@ class AlarmHandler:
         Args:
             record: 日志记录对象
         """
-        if record["level"].name == "ERROR":
-            log_message = record["message"]
+        if isinstance(record, dict) and record.get("level") and "ERROR" in str(record["level"]):
+            log_message = record.get("message", "")
             module = record.get("name")
             function = record.get("function")
 

@@ -91,7 +91,6 @@ def enable_alarm_handler():
     logger.add(
         lambda record: alarm_handler(record),
         level="ERROR",
-        format="{message}",
         enqueue=False
     )
     logger.info("告警日志处理器已启用")
