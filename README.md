@@ -5,7 +5,7 @@ Q-Trader 是一款专为现代金融投资打造的专业量化交易平台，�
 ## 技术栈
 
 ### 后端
-- **语言**: Python 3.8+
+- **语言**: Python 3.12+
 - **Web框架**: FastAPI
 - **数据库**: SQLite
 - **ORM**: SQLAlchemy
@@ -88,7 +88,7 @@ pip install -r requirements.txt
 复制示例配置文件并修改：
 
 ```bash
-cp config/config.yaml config/config.yaml
+cp config/config-sample.yaml config/config.yaml
 ```
 
 编辑 `config/config.yaml`，配置交易账户信息。
