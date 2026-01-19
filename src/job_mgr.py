@@ -9,7 +9,7 @@ from typing import Optional
 
 from src.config_loader import AppConfig
 from src.database import get_session
-from src.models.po import PositionPo as PositionModel, AlarmPo as AlarmModel
+from src.models.po import AlarmPo as AlarmModel
 from src.switch_mgr import SwitchPosManager
 from src.trading_engine import TradingEngine
 from src.utils.logger import get_logger
@@ -71,14 +71,9 @@ class JobManager:
 
     def export_positions_to_csv(self) -> None:
         """导出持仓到CSV文件"""
-        session = get_session()
-        if not session:
-            logger.error("无法获取数据库会话")
-            return
-
         try:
-            # 获取所有持仓
-            positions = session.query(PositionModel).all()
+            # 从内存获取所有持仓
+            positions = self.trading_engine.positions
 
             if not positions:
                 logger.info("当前没有持仓，跳过导出")
@@ -90,7 +85,7 @@ class JobManager:
 
             # 生成文件名
             today = datetime.now().strftime("%Y-%m-%d")
-            file_name = f"position-tq-{today}.csv"
+            file_name = f"position-{self.config.account_id}-{today}.csv"
             file_path = export_dir / file_name
 
             # 导出数据
@@ -99,23 +94,60 @@ class JobManager:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
 
-                for pos in positions:
-                    row = {
-                        "账户ID": pos.account_id,
-                        "交易日期": today,
-                        "合约代码": pos.symbol,
-                        "方向": "多" if pos.pos_long > 0 else "空" if pos.pos_short > 0 else "-",
-                        "今仓": pos.pos_long if pos.pos_long > 0 else pos.pos_short if pos.pos_short > 0 else 0,
-                        "昨仓": 0,
-                    }
-                    writer.writerow(row)
+                for symbol, pos in positions.items():
+                    pos_long = pos.get("pos_long", 0)
+                    pos_short = pos.get("pos_short", 0)
+
+                    # 如果多空都有值，拆分成两条记录
+                    if pos_long > 0 and pos_short > 0:
+                        # 多头记录
+                        row_long = {
+                            "账户ID": self.config.account_id,
+                            "交易日期": today,
+                            "合约代码": symbol,
+                            "方向": "多",
+                            "今仓": pos_long,
+                            "昨仓": 0,
+                        }
+                        writer.writerow(row_long)
+
+                        # 空头记录
+                        row_short = {
+                            "账户ID": self.config.account_id,
+                            "交易日期": today,
+                            "合约代码": symbol,
+                            "方向": "空",
+                            "今仓": pos_short,
+                            "昨仓": 0,
+                        }
+                        writer.writerow(row_short)
+                    elif pos_long > 0:
+                        # 只有多头
+                        row = {
+                            "账户ID": self.config.account_id,
+                            "交易日期": today,
+                            "合约代码": symbol,
+                            "方向": "多",
+                            "今仓": pos_long,
+                            "昨仓": 0,
+                        }
+                        writer.writerow(row)
+                    elif pos_short > 0:
+                        # 只有空头
+                        row = {
+                            "账户ID": self.config.account_id,
+                            "交易日期": today,
+                            "合约代码": symbol,
+                            "方向": "空",
+                            "今仓": pos_short,
+                            "昨仓": 0,
+                        }
+                        writer.writerow(row)
 
             logger.info(f"持仓已导出到: {file_path}")
 
         except Exception as e:
             logger.error(f"导出持仓到CSV失败: {e}")
-        finally:
-            session.close()
 
     def test_log(self) -> None:
         """测试日志任务（每5秒执行）"""
