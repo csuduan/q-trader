@@ -95,6 +95,7 @@ def create_app(config=None) -> FastAPI:
     app.include_router(trade_router)
     app.include_router(order_router)
     app.include_router(quote_router)
+    app.include_router(strategy_router)
     app.include_router(jobs_router)
     app.include_router(rotation_router)
     app.include_router(system_router)

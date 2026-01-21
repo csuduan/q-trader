@@ -120,3 +120,33 @@ class WebSocketManager:
 
 # 创建全局实例
 websocket_manager = WebSocketManager()
+
+    # ==================== 策略事件推送 ====================
+
+    async def broadcast_strategy_status(self, strategy_status: dict):
+        """
+        推送策略状态更新
+
+        Args:
+            strategy_status: 策略状态数据
+        """
+        message = {
+            "type": "strategy_status",
+            "data": strategy_status,
+            "timestamp": datetime.now().isoformat()
+        }
+        await self.broadcast(message)
+
+    async def broadcast_strategy_signal(self, signal: dict):
+        """
+        推送策略信号
+
+        Args:
+            signal: 策略信号数据
+        """
+        message = {
+            "type": "strategy_signal",
+            "data": signal,
+            "timestamp": datetime.now().isoformat()
+        }
+        await self.broadcast(message)
