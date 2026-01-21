@@ -10,8 +10,7 @@ from typing import Any, Dict, List, Optional
 from threading import Thread
 
 
-from tqsdk import TqApi, TqAuth, TqKq, TqSim
-from tqsdk.objs import Account, Order, Position, Quote, Trade
+# tqsdk已移至TqGateway，TradingEngine通过Gateway操作
 
 from src.config_loader import AppConfig
 from src.risk_control import RiskControl
@@ -35,19 +34,19 @@ class TradingEngine:
 
         self.config = config
         self.account_id = config.account_id
-        self.api: Optional[TqApi] = None
-        self.auth: Optional[TqAuth] = None
+        # Gateway实例（所有tqsdk操作通过gateway进行）
+        self.gateway = None
         self.account: Optional[Any] = None
         self.connected = False
         self.paused = config.trading.paused
         self._running = False
         self._pending_disconnect = False
 
-        # 订阅的数据（从tqsdk获取）
-        self.quotes: Dict[str, Quote] = {}
-        self.positions: Dict[str, Position] = {}
-        self.orders: Dict[str, Order] = {}
-        self.trades: Dict[str, Trade] = {}
+        # 缓存的统一格式数据（从Gateway转换）
+        self.quotes: Dict[str, Any] = {}
+        self.positions: Dict[str, Any] = {}
+        self.orders: Dict[str, Any] = {}
+        self.trades: Dict[str, Any] = {}
 
         # 风控模块（使用配置文件中的默认值，启动后会从数据库加载）
         self.risk_control = RiskControl(config.risk_control)
@@ -116,17 +115,24 @@ class TradingEngine:
 
     def connect(self) -> bool:
         """
-        连接到TqSdk
+        连接到交易系统（通过Gateway）
 
         Returns:
             bool: 连接是否成功
         """
         try:
-            logger.info("连接到TqSdk...")
-            # 创建认证
-            self.auth = TqAuth(self.config.tianqin.username, self.config.tianqin.password)
-
-            # 根据账户类型创建对应的账户对象
+            logger.info("连接到交易系统（通过Gateway）...")
+            
+            # 使用Gateway适配器
+            if not self.gateway:
+                from src.trading_engine_gateway import create_gateway
+                self.gateway = create_gateway(self)
+            
+            return self.gateway.connect()
+            
+        except Exception as e:
+            logger.error(f"连接失败: {e}", exc_info=True)
+            return False
             if self.config.account_type == "kq":
                 # 快期模拟账户
                 account = TqKq()
@@ -135,7 +141,7 @@ class TradingEngine:
                 # 实盘账户
                 if not self.config.trading_account:
                     raise ValueError("实盘账户需要配置 trading_account")
-                from tqsdk import TqAccount
+                # TqAccount已移至TqGateway
                 account = TqAccount(
                     self.config.trading_account.broker_name,
                     self.config.trading_account.user_id,
@@ -624,6 +630,23 @@ class TradingEngine:
 
     def cancel_order(self, order_id: str) -> bool:
         """
+        撤单（通过Gateway适配器）
+
+        Args:
+            order_id: 订单ID
+
+        Returns:
+            bool: 撤单是否成功
+        """
+        # 优先使用Gateway适配器
+        if self.gateway and self.gateway.connected:
+            from src.models.object import CancelRequest
+            req = CancelRequest(order_id=order_id)
+            return self.gateway.cancel_order(req)
+        
+        # 兼容性：返回False（原有逻辑已移至Gateway）
+        logger.warning("Gateway未初始化或未连接")
+        return False
         撤单
 
         Args:
@@ -705,6 +728,19 @@ class TradingEngine:
 
     def subscribe_symbol(self, symbol: str) -> bool:
         """
+        订阅合约行情（通过Gateway）
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            bool: 订阅是否成功
+        """
+        if self.gateway:
+            from src.models.object import SubscribeRequest
+            req = SubscribeRequest(symbols=[symbol])
+            return self.gateway.subscribe(req)
+        return False
         订阅合约行情
 
         Args:
@@ -764,6 +800,19 @@ class TradingEngine:
 
     def unsubscribe_symbol(self, symbol: str) -> bool:
         """
+        取消订阅合约行情（通过Gateway）
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            bool: 取消订阅是否成功
+        """
+        if self.gateway:
+            from src.models.object import SubscribeRequest
+            req = SubscribeRequest(symbols=[symbol])
+            return self.gateway.unsubscribe(req)
+        return False
         取消订阅合约行情
 
         Args:
