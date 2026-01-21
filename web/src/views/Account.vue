@@ -456,7 +456,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { orderApi, positionApi, quoteApi } from '@/api'
 import wsManager from '@/ws'
@@ -608,22 +608,7 @@ async function handleSubscribe() {
   }
 }
 
-// @ts-expect-error - kept for future use
-async function handleUnsubscribe(symbol: string) {
-  try {
-    await ElMessageBox.confirm(`确定要取消订阅 ${symbol} 吗？`, '确认取消', {
-      type: 'warning'
-    })
 
-    await quoteApi.unsubscribeSymbol(symbol)
-    ElMessage.success('取消订阅成功')
-    await loadQuotes()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`取消订阅失败: ${error.message}`)
-    }
-  }
-}
 
 function handleOrderSelectionChange(selection: Order[]) {
   selectedOrders.value = selection
@@ -633,8 +618,7 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   const volume = direction === 'SELL' ? position.pos_long : position.pos_short
   if (volume <= 0) return
 
-  // 使用 exchange_id 和 instrument_id 组合成 symbol
-  closeForm.symbol = position.exchange_id + '.' + position.instrument_id
+  closeForm.symbol = position.instrument_id
   closeForm.direction = direction
   closeForm.offset = 'CLOSE'
   closeForm.volume = volume
@@ -643,32 +627,6 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   showCloseDialog.value = true
 }
 
-// @ts-expect-error - kept for future use
-async function handleCancelSelected() {
-  if (selectedOrders.value.length === 0) {
-    ElMessage.warning('请选择要撤销的委托单')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(`确定要撤销 ${selectedOrders.value.length} 个委托单吗？`, '确认撤单', {
-      type: 'warning'
-    })
-
-    cancelling.value = true
-    const orderIds = selectedOrders.value.map(order => order.order_id)
-    const result = await orderApi.cancelBatchOrders(orderIds)
-    ElMessage.success(`批量撤单完成: 成功 ${result.success_count}/${result.total}`)
-    selectedOrders.value = []
-    await loadOrderData()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`撤单失败: ${error.message}`)
-    }
-  } finally {
-    cancelling.value = false
-  }
-}
 
 async function handleCreateOrder() {
   if (!orderForm.symbol || !orderForm.direction || !orderForm.offset || orderForm.volume <= 0) {

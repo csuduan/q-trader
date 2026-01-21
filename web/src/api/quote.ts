@@ -9,7 +9,7 @@ export const quoteApi = {
    * 获取所有已订阅的行情列表
    */
   getSubscribedQuotes: async (): Promise<Quote[]> => {
-    return await api.get<Quote[]>('/quote') as unknown as Quote[]
+    return api.get<Quote[]>('/quote')
   },
 
   /**
