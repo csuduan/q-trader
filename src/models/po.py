@@ -159,6 +159,7 @@ class RotationInstructionPo(Base):
     order_placed_time = Column(DateTime, nullable=True)
     last_attempt_time = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
+    source = Column(String(255), nullable=True)  # 来源：文件名 或 '手动添加'
     is_deleted = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

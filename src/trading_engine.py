@@ -292,7 +292,7 @@ class TradingEngine:
             return True
 
         except Exception as e:
-            logger.error(f"更新数据时出错: {e}")
+            logger.error(f"更新数据时出错: {e}", exc_info=e)
             self._emit_event(EventTypes.SYSTEM_ERROR, {"error": str(e)})
             return False
 
@@ -676,7 +676,7 @@ class TradingEngine:
         订阅合约行情
 
         Args:
-            symbol: 合约代码
+            symbol: 合约代码，支持多种格式
 
         Returns:
             bool: 是否订阅成功
@@ -685,18 +685,24 @@ class TradingEngine:
             logger.error("交易引擎未连接，无法订阅行情")
             return False
 
+        # 格式化合约代码
+        formatted_symbol = self._format_symbol(symbol)
+        if not formatted_symbol:
+            logger.error(f"合约代码格式错误: {symbol}")
+            return False
+
         try:
-            if symbol in self.quotes:
-                logger.debug(f"合约 {symbol} 已订阅")
+            if formatted_symbol in self.quotes:
+                logger.debug(f"合约 {formatted_symbol} 已订阅")
                 return True
 
-            quote = self.api.get_quote(symbol)
-            self.quotes[symbol] = quote
-            logger.info(f"已订阅行情: {symbol}")
+            quote = self.api.get_quote(formatted_symbol)
+            self.quotes[formatted_symbol] = quote
+            logger.info(f"已订阅行情: {formatted_symbol}")
             return True
 
         except Exception as e:
-            logger.error(f"订阅 {symbol} 失败: {e}")
+            logger.error(f"订阅 {formatted_symbol} 失败: {e}")
             return False
 
     def is_subscribed(self, symbol: str) -> bool:
@@ -704,12 +710,15 @@ class TradingEngine:
         检查合约是否已订阅
 
         Args:
-            symbol: 合约代码
+            symbol: 合约代码，支持多种格式
 
         Returns:
             bool: 是否已订阅
         """
-        return symbol in self.quotes
+        formatted_symbol = self._format_symbol(symbol)
+        if not formatted_symbol:
+            return False
+        return formatted_symbol in self.quotes
 
     def get_subscribed_symbols(self) -> List[str]:
         """

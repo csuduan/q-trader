@@ -44,6 +44,7 @@ class RotationInstructionResponse(BaseModel):
     order_placed_time: Optional[datetime] = None
     last_attempt_time: Optional[datetime] = None
     error_message: Optional[str] = None
+    source: Optional[str] = None
     is_deleted: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -183,6 +184,7 @@ async def create_rotation_instruction(
         order_placed_time=None,
         last_attempt_time=None,
         error_message=None,
+        source="手动添加",
         created_at=datetime.now(),
         updated_at=datetime.now()
     )

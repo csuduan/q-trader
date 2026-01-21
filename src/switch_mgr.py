@@ -183,6 +183,7 @@ class SwitchPosManager:
                         order_placed_time=None,
                         last_attempt_time=None,
                         error_message=None,
+                        source=filename,
                         is_deleted=False,
                         created_at=datetime.now(),
                         updated_at=datetime.now()
@@ -201,6 +202,17 @@ class SwitchPosManager:
             session.commit()
             logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
 
+            # 对导入的合约进行订阅
+            subscribed_symbols = set()
+            for symbol in [inst.symbol for inst in session.query(RotationInstructionPo).filter_by(
+                trading_date=trading_date,
+                is_deleted=False
+            ).all()]:
+                if symbol not in subscribed_symbols and not self.trading_engine.is_subscribed(symbol):
+                    if self.trading_engine.subscribe_symbol(symbol):
+                        subscribed_symbols.add(symbol)
+                        logger.info(f"导入时订阅合约: {symbol}")
+
             data={
                     "imported": imported_count,
                     "failed": failed_count,
@@ -210,6 +222,38 @@ class SwitchPosManager:
         except Exception as e:
             raise Exception(f"导入文件失败{e}")
 
+    def subscribe_today_symbols(self) -> None:
+        """订阅今日换仓记录中的所有合约"""
+        try:
+            session = get_session()
+            if not session:
+                logger.error("无法获取数据库会话")
+                return
+
+            today = datetime.now().strftime("%Y%m%d")
+            instructions = session.query(RotationInstructionPo).filter(
+                RotationInstructionPo.trading_date == today,
+                RotationInstructionPo.is_deleted == False,
+                RotationInstructionPo.enabled == True
+            ).all()
+
+            if not instructions:
+                logger.info("今日无换仓记录，无需订阅合约")
+                return
+
+            subscribed_count = 0
+            for instruction in instructions:
+                if not self.trading_engine.is_subscribed(instruction.symbol):
+                    if self.trading_engine.subscribe_symbol(instruction.symbol):
+                        subscribed_count += 1
+
+            logger.info(f"系统启动时已订阅 {subscribed_count} 个换仓合约")
+
+        except Exception as e:
+            logger.error(f"订阅今日换仓合约时出错: {e}")
+        finally:
+            session.close()
+
     def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
         try:
@@ -218,7 +262,7 @@ class SwitchPosManager:
             csv_files = [f for f in today_dir.glob("*.csv") if today_str in f.name and self.config.account_id in f.name]
             if not csv_files:
                 return
-            
+
             #logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
             session = get_session()
             for csv_file in csv_files:

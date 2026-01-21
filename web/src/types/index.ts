@@ -131,6 +131,7 @@ export interface RotationInstruction {
   current_order_id: string | null
   last_attempt_time: string | null
   error_message: string | null
+  source: string | null
   is_deleted: boolean
   created_at: string
   updated_at: string

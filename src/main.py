@@ -112,6 +112,10 @@ def main():
     switch_pos_manager = SwitchPosManager(config, trading_engine)
     set_switch_pos_manager(switch_pos_manager)
 
+    # 订阅今日换仓记录中的合约
+    logger.info("订阅今日换仓记录中的合约...")
+    switch_pos_manager.subscribe_today_symbols()
+
     # 启动任务调度器
     logger.info("创建任务调度器...")
     task_scheduler = TaskScheduler(config, trading_engine)

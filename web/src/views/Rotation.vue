@@ -88,6 +88,11 @@
               {{ formatDateTime(row.updated_at) }}
             </template>
           </el-table-column>
+          <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.source || '-' }}
+            </template>
+          </el-table-column>
         </el-table>
 
         <el-empty v-if="instructions.length === 0" description="暂无换仓指令" />
