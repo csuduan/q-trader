@@ -803,3 +803,104 @@ class TradingEngine:
             self.event_engine.put(event_type, data)
         except Exception as e:
             logger.error(f"推送事件失败 [{event_type}]: {e}")
+
+    # ==================== Gateway适配器支持 ====================
+
+    def init_gateway_adapter(self):
+        """
+        初始化Gateway适配器（新增功能）
+
+        将TqGateway包装在TradingEngine外层，支持多接口切换
+        """
+        from src.adapters.tq_gateway import TqGateway
+
+        self.gateway_adapter = TqGateway(self)
+        logger.info("Gateway适配器初始化完成（TqSdk）")
+
+    def connect_gateway(self) -> bool:
+        """通过Gateway适配器连接（新增）"""
+        if hasattr(self, 'gateway_adapter'):
+            return self.gateway_adapter.connect()
+        return self.connect()
+
+    def send_order_via_gateway(self, symbol: str, direction: str, offset: str,
+                            volume: int, price: float = 0) -> Optional[str]:
+        """通过Gateway适配器下单（新增）"""
+        if not hasattr(self, 'gateway_adapter'):
+            return self.insert_order(symbol, direction, offset, volume, price)
+
+        from src.models.object import OrderRequest, Direction, Offset
+        req = OrderRequest(
+            symbol=symbol,
+            direction=Direction(direction),
+            offset=Offset(offset),
+            volume=volume,
+            price=price if price > 0 else None
+        )
+        return self.gateway_adapter.send_order(req)
+
+    def cancel_order_via_gateway(self, order_id: str) -> bool:
+        """通过Gateway适配器撤单（新增）"""
+        if not hasattr(self, 'gateway_adapter'):
+            return self.cancel_order(order_id)
+
+        from src.models.object import CancelRequest
+        req = CancelRequest(order_id=order_id)
+        return self.gateway_adapter.cancel_order(req)
+
+    # ==================== 策略系统支持 ====================
+
+    def init_strategy_system(self, config_path: str = "config/strategies.yaml"):
+        """
+        初始化策略系统（新增功能）
+
+        Args:
+            config_path: 策略配置文件路径
+        """
+        from src.strategy.strategy_manager import StrategyManager
+
+        self.strategy_manager = StrategyManager()
+        if self.strategy_manager.load_config(config_path):
+            logger.info("策略系统初始化完成")
+            return True
+        return False
+
+    def register_strategy_callbacks(self):
+        """注册策略系统到Gateway（新增）"""
+        if not hasattr(self, 'strategy_manager'):
+            return
+
+        if not hasattr(self, 'gateway_adapter'):
+            logger.warning("Gateway适配器未初始化，无法注册策略回调")
+            return
+
+        # 注册策略回调
+        self.gateway_adapter.register_strategy_callbacks(
+            on_tick=lambda tick: self._dispatch_to_strategies('on_tick', tick),
+            on_bar=lambda bar: self._dispatch_to_strategies('on_bar', bar)
+        )
+
+    def _dispatch_to_strategies(self, method: str, data):
+        """分发数据到所有策略（新增）"""
+        for name, strategy in self.strategy_manager.strategies.items():
+            if strategy.active:
+                try:
+                    getattr(strategy, method)(data)
+                except Exception as e:
+                    logger.error(f"策略 {name} {method} 失败: {e}", exc_info=True)
+
+    def start_all_strategies(self):
+        """启动所有已启用的策略（新增）"""
+        if hasattr(self, 'strategy_manager'):
+            self.strategy_manager.start_all()
+
+    def stop_all_strategies(self):
+        """停止所有策略（新增）"""
+        if hasattr(self, 'strategy_manager'):
+            self.strategy_manager.stop_all()
+
+    def get_strategy_status(self) -> list:
+        """获取所有策略状态（新增）"""
+        if hasattr(self, 'strategy_manager'):
+            return self.strategy_manager.get_status()
+        return []
