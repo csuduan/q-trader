@@ -52,6 +52,8 @@ class TradingEngine:
         # 风控模块（使用配置文件中的默认值，启动后会从数据库加载）
         self.risk_control = RiskControl(config.risk_control)
 
+        self._hist_subs = set()
+
         # 事件引擎
         self.event_engine = event_engine
 
@@ -129,6 +131,7 @@ class TradingEngine:
             # 获取持仓信息
             self.positions = self.api.get_position()
             logger.info(f"成功获取持仓信息: {len(self.positions)}条")
+            self._hist_subs.update(self.positions.keys())
 
             # 获取成交记录
             self.trades = self.api.get_trade()
@@ -257,7 +260,9 @@ class TradingEngine:
     def _init_subscriptions(self) -> None:
         """初始化行情订阅"""
         # 订阅tick行情
-        for symbol in self.positions.keys():
+        self.quotes = {}
+    
+        for symbol in self._hist_subs:
             try:
                 quote = self.api.get_quote(symbol)
                 self.quotes[symbol] = quote
@@ -698,6 +703,7 @@ class TradingEngine:
 
             quote = self.api.get_quote(formatted_symbol)
             self.quotes[formatted_symbol] = quote
+            self._hist_subs.add(formatted_symbol)
             logger.info(f"已订阅行情: {formatted_symbol}")
             return True
 
