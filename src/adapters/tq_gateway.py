@@ -1,6 +1,6 @@
 """
-TqSdk Gateway适配器（完整实现）
-包含所有tqsdk逻辑，TradingEngine通过此适配器与tqsdk交互
+TqSdk Gateway适配器(完整实现)
+包含所有tqsdk逻辑,TradingEngine通过此适配器与tqsdk交互
 """
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -21,18 +21,19 @@ logger = get_logger(__name__)
 
 
 class TqGateway(BaseGateway):
-    """TqSdk Gateway适配器（完整实现）
+    """TqSdk Gateway适配器(完整实现)"""
 
     gateway_name = "TqSdk"
 
-    def __init__(self):
+    def __init__(self, trading_engine=None):
         super().__init__()
+        self.trading_engine = trading_engine
         
         # TqSdk API实例
         self.api: Optional[TqApi] = None
         self.auth: Optional[TqAuth] = None
         
-        # 数据缓存（转换为统一模型）
+        # 数据缓存(转换为统一模型)
         self._account: Optional[AccountData] = None
         self._positions: Dict[str, List[PositionData]] = {}
         self._orders: Dict[str, OrderData] = {}
@@ -40,14 +41,14 @@ class TqGateway(BaseGateway):
         self._quotes: Dict[str, TickData] = {}
         self._contracts: Dict[str, ContractData] = {}
         
-        # TqSdk原始数据缓存（用于is_changing检查）
+        # TqSdk原始数据缓存(用于is_changing检查)
         self._tq_account: Optional[Account] = None
         self._tq_positions: Dict[str, Position] = {}
         self._tq_orders: Dict[str, Order] = {}
         self._tq_trades: Dict[str, Trade] = {}
         self._tq_quotes: Dict[str, Quote] = {}
         
-        # 配置（在connect时设置）
+        # 配置(在connect时设置)
         self.config = None
         self.account_id = None
         
@@ -70,45 +71,48 @@ class TqGateway(BaseGateway):
     
     # ==================== 连接管理 ====================
     
-    def connect(self, config: Dict[str, Any]) -> bool:
+    def connect(self) -> bool:
         """
         连接到TqSdk
-        
-        Args:
-            config: 配置字典（包含account_id, account_type, tianqin, trading_account等）
         """
         try:
+            if not self.trading_engine:
+                logger.error("TradingEngine实例未传入，无法连接")
+                return False
+
+            config = self.trading_engine.config
             self.config = config
-            self.account_id = config.get('account_id', '')
-            account_type = config.get('account_type', 'sim')
+            self.account_id = config.account_id
+            account_type = config.account_type
             
-            logger.info(f"连接到TqSdk，账户类型: {account_type}, 账户ID: {self.account_id}")
-            
+            logger.info(f"连接到TqSdk,账户类型: {account_type}, 账户ID: {self.account_id}")
+
             # 创建认证
-            username = config.get('tianqin', {}).get('username', '')
-            password = config.get('tianqin', {}).get('password', '')
+            tianqin = config.tianqin if config.tianqin else {}
+            username = getattr(tianqin, 'username', '')
+            password = getattr(tianqin, 'password', '')
             if username and password:
                 self.auth = TqAuth(username, password)
             else:
                 self.auth = None
-            
+
             # 根据账户类型创建账户对象
             if account_type == 'kq':
                 account = TqKq()
             elif account_type == 'real':
-                trading_cfg = config.get('trading_account', {})
+                trading_cfg = config.trading_account if config.trading_account else {}
                 account = TqAccount(
-                    broker_id=trading_cfg.get('broker_name', ''),
-                    user_id=trading_cfg.get('user_id', ''),
-                    password=trading_cfg.get('password', ''),
+                    broker_id=getattr(trading_cfg, 'broker_name', ''),
+                    user_id=getattr(trading_cfg, 'user_id', ''),
+                    password=getattr(trading_cfg, 'password', ''),
                 )
-                if 'auth_code' in trading_cfg and 'app_id' in trading_cfg:
+                if hasattr(trading_cfg, 'auth_code') and hasattr(trading_cfg, 'app_id'):
                     account = TqAccount(
-                        broker_id=trading_cfg.get('broker_name', ''),
-                        user_id=trading_cfg.get('user_id', ''),
-                        password=trading_cfg.get('password', ''),
-                        auth_code=trading_cfg.get('auth_code', ''),
-                        app_id=trading_cfg.get('app_id', ''),
+                        broker_id=getattr(trading_cfg, 'broker_name', ''),
+                        user_id=getattr(trading_cfg, 'user_id', ''),
+                        password=getattr(trading_cfg, 'password', ''),
+                        auth_code=getattr(trading_cfg, 'auth_code', ''),
+                        app_id=getattr(trading_cfg, 'app_id', ''),
                     )
             else:  # sim
                 account = TqSim()
@@ -142,7 +146,7 @@ class TqGateway(BaseGateway):
             
             self.connected = True
             self.trading_day = datetime.now().strftime("%Y%m%d")
-            logger.info(f"TqSdk连接成功，交易日: {self.trading_day}")
+            logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
             return True
             
         except Exception as e:
@@ -193,12 +197,12 @@ class TqGateway(BaseGateway):
             return False
     
     def subscribe_symbol(self, symbol: str) -> bool:
-        """订阅单个合约（兼容方法）"""
+        """订阅单个合约(兼容方法)"""
         req = SubscribeRequest(symbols=[symbol])
         return self.subscribe(req)
     
     def unsubscribe_symbol(self, symbol: str) -> bool:
-        """取消订阅单个合约（兼容方法）"""
+        """取消订阅单个合约(兼容方法)"""
         req = SubscribeRequest(symbols=[symbol])
         return self.unsubscribe(req)
     
@@ -216,7 +220,7 @@ class TqGateway(BaseGateway):
                 logger.error(f"无效的合约代码: {req.symbol}")
                 return None
             
-            # 获取行情信息（市价单使用对手价）
+            # 获取行情信息(市价单使用对手价)
             price = req.price
             if price is None:
                 quote = self._quotes.get(formatted_symbol)
@@ -361,14 +365,14 @@ class TqGateway(BaseGateway):
             logger.error(f"查询合约失败: {e}")
             return {}
     
-    # ==================== 兼容方法（供外部直接调用）====================
+    # ==================== 兼容方法(供外部直接调用)====================
     
     def get_account(self) -> Optional[AccountData]:
-        """获取账户数据（兼容）"""
+        """获取账户数据(兼容)"""
         return self.query_account()
     
     def get_positions(self) -> Dict[str, Any]:
-        """获取持仓数据（兼容，返回原始格式）"""
+        """获取持仓数据(兼容,返回原始格式)"""
         try:
             if not self.connected or not self._tq_positions:
                 return {}
@@ -377,14 +381,14 @@ class TqGateway(BaseGateway):
                 self._tq_positions = self.api.get_position()
                 self._convert_and_cache_data()
             
-            # 返回原始tqsdk格式（兼容性）
+            # 返回原始tqsdk格式(兼容性)
             return self._tq_positions
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
             return {}
     
     def get_orders(self) -> Dict[str, Any]:
-        """获取订单数据（兼容，返回原始格式）"""
+        """获取订单数据(兼容,返回原始格式)"""
         try:
             if not self.connected or not self._tq_orders:
                 return {}
@@ -399,7 +403,7 @@ class TqGateway(BaseGateway):
             return {}
     
     def get_trades(self) -> Dict[str, Any]:
-        """获取成交数据（兼容，返回原始格式）"""
+        """获取成交数据(兼容,返回原始格式)"""
         try:
             if not self.connected or not self._tq_trades:
                 return {}
@@ -414,7 +418,7 @@ class TqGateway(BaseGateway):
             return {}
     
     def get_quotes(self) -> Dict[str, Any]:
-        """获取行情数据（兼容，返回原始格式）"""
+        """获取行情数据(兼容,返回原始格式)"""
         try:
             return self._tq_quotes
         except Exception as e:
@@ -423,10 +427,10 @@ class TqGateway(BaseGateway):
     
     def wait_update(self, timeout: int = 3) -> bool:
         """
-        等待数据更新（兼容方法）
+        等待数据更新(兼容方法)
         
         Args:
-            timeout: 超时时间（秒）
+            timeout: 超时时间(秒)
         
         Returns:
             bool: 是否有数据更新
@@ -507,7 +511,7 @@ class TqGateway(BaseGateway):
         )
     
     def _convert_position(self, pos: Position, symbol: str) -> List[PositionData]:
-        """转换持仓数据（支持多空）"""
+        """转换持仓数据(支持多空)"""
         result = []
         exchange_id = symbol.split(".")[0] if "." in symbol else ""
         instrument_id = symbol.split(".")[1] if "." in symbol else symbol
@@ -590,8 +594,11 @@ class TqGateway(BaseGateway):
         """转换tick数据"""
         exchange_id = symbol.split(".")[0] if "." in symbol else ""
         instrument_id = symbol.split(".")[1] if "." in symbol else symbol
-        datetime_obj = quote.get("datetime", 0)
-        
+        try:
+            datetime_obj = int(float(str(quote.get("datetime", 0)).strip()))
+        except (ValueError, TypeError):
+            datetime_obj = 0
+
         return TickData(
             symbol=instrument_id,
             exchange=self._parse_exchange(exchange_id),
@@ -627,10 +634,10 @@ class TqGateway(BaseGateway):
                     # exchange.symbol 格式
                     return symbol
                 elif parts[1].upper() in self.exchange_map:
-                    # symbol.exchange 格式，需要转换
+                    # symbol.exchange 格式,需要转换
                     return f"{parts[1].upper()}.{parts[0]}"
         else:
-            # 只有symbol，需要查询交易所
+            # 只有symbol,需要查询交易所
             # 简化处理：默认返回原值
             return symbol
         
