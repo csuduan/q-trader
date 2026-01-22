@@ -27,8 +27,8 @@ def create_gateway(trading_engine):
     if gateway_type == 'CTP':
         from src.adapters.ctp_gateway import CtpGateway
         gateway = CtpGateway()
-        logger.info("CTP Gateway创建成功（框架实现，需CTP SDK）")
-    else:  # 默认TQSDK
+        logger.info("CTP Gateway创建成功(框架实现，需CTP SDK)")
+    else: # 默认TQSDK
         from src.adapters.tq_gateway import TqGateway
         gateway = TqGateway(trading_engine)
         logger.info("TqSdk Gateway创建成功")
