@@ -402,7 +402,7 @@ class TradingEngine:
                                   f"offset: {event_data['offset']}, "
                                   f"volume_orign: {event_data['volume_orign']}, "
                                   f"volume_left: {event_data['volume_left']}, "
-                                  f"limit_price: {event_data['limit_price']:.2f} " if event_data['limit_price'] else "None",
+                                  f"limit_price: {event_data['limit_price']:.2f} "
                                   f"price_type: {event_data['price_type']}, "
                                   f"status: {event_data['status']}, ")
 

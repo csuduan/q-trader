@@ -304,6 +304,7 @@ class SwitchPosManager:
         self.running_instructions = all_instructions
         if not all_instructions:
             logger.info("今日无换仓指令")
+            self.working = False
             return
         logger.info(f"获取到 {len(all_instructions)} 条可执行换仓指令")
 
@@ -345,7 +346,7 @@ class SwitchPosManager:
                                 
                             else:
                                 # 检测报单是否超时，且剩余可报单次数大于0，才可以撤单
-                                order_age_seconds = (datetime.now() - current_order.insert_date_time).total_seconds()
+                                order_age_seconds = (datetime.now() - datetime.fromtimestamp(current_order.insert_date_time/1_000_000_000) ).total_seconds()
                                 if order_age_seconds >= self.config.risk_control.order_timeout and int(instruction.remaining_attempts) > 0:
                                     self._cancel_order(str(current_order.order_id))
                                 else:
@@ -355,7 +356,7 @@ class SwitchPosManager:
                             order_volume = min(instruction.remaining_volume, self.config.risk_control.max_split_volume)
                             self._insert_order(instruction, order_volume)
                     except Exception as e:
-                        logger.error(f"处理指令 {instruction.symbol} 时出错: {e}")
+                        logger.exception(f"处理指令 {instruction.symbol} 时出错: {e}")
                         instruction.status = "FAILED"
                         instruction.error_message = str(e)
                 time.sleep(1)        

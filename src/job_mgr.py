@@ -84,61 +84,41 @@ class JobManager:
             export_dir.mkdir(parents=True, exist_ok=True)
 
             # 生成文件名
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = datetime.now().strftime("%Y%m%d")
             file_name = f"position-{self.config.account_id}-{today}.csv"
             file_path = export_dir / file_name
 
             # 导出数据
             with open(file_path, "w", encoding="gbk", newline="") as f:
-                fieldnames = ["账户ID", "交易日期", "合约代码", "方向", "今仓", "昨仓"]
+                fieldnames = ["账户", "交易日期", "合约代码", "方向", "今仓", "昨仓"]
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
 
                 for symbol, pos in positions.items():
                     pos_long = pos.get("pos_long", 0)
                     pos_short = pos.get("pos_short", 0)
-
-                    # 如果多空都有值，拆分成两条记录
-                    if pos_long > 0 and pos_short > 0:
-                        # 多头记录
-                        row_long = {
-                            "账户ID": self.config.account_id,
-                            "交易日期": today,
-                            "合约代码": symbol,
-                            "方向": "多",
-                            "今仓": pos_long,
-                            "昨仓": 0,
-                        }
-                        writer.writerow(row_long)
-
-                        # 空头记录
-                        row_short = {
-                            "账户ID": self.config.account_id,
-                            "交易日期": today,
-                            "合约代码": symbol,
-                            "方向": "空",
-                            "今仓": pos_short,
-                            "昨仓": 0,
-                        }
-                        writer.writerow(row_short)
-                    elif pos_long > 0:
-                        # 只有多头
+                    if len(symbol) > 12:
+                        #过滤掉合约名特别长的持仓(一般未组合持仓)
+                        continue
+            
+                    if pos_long > 0:
+                        # 多头
                         row = {
-                            "账户ID": self.config.account_id,
+                            "账户": self.config.account_id,
                             "交易日期": today,
                             "合约代码": symbol,
-                            "方向": "多",
+                            "方向": "Buy",
                             "今仓": pos_long,
                             "昨仓": 0,
                         }
                         writer.writerow(row)
-                    elif pos_short > 0:
-                        # 只有空头
+                    if pos_short > 0:
+                        # 空头
                         row = {
-                            "账户ID": self.config.account_id,
+                            "账户": self.config.account_id,
                             "交易日期": today,
                             "合约代码": symbol,
-                            "方向": "空",
+                            "方向": "Sell",
                             "今仓": pos_short,
                             "昨仓": 0,
                         }
