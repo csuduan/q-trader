@@ -100,7 +100,8 @@ class JobManager:
                     if len(symbol) > 12:
                         #过滤掉合约名特别长的持仓(一般未组合持仓)
                         continue
-            
+                    #只需要合约代码
+                    symbol= symbol.split(".")[1]         
                     if pos_long > 0:
                         # 多头
                         row = {
