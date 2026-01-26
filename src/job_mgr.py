@@ -95,8 +95,8 @@ class JobManager:
                 writer.writeheader()
 
                 for symbol, pos in positions.items():
-                    pos_long = pos.get("pos_long", 0)
-                    pos_short = pos.get("pos_short", 0)
+                    pos_long = pos.pos_long
+                    pos_short = pos.pos_short
 
                     # 如果多空都有值，拆分成两条记录
                     if pos_long > 0 and pos_short > 0:
@@ -200,3 +200,14 @@ class JobManager:
             session.rollback()
         finally:
             session.close()
+
+    def reset_strategies(self) -> None:
+        """重置所有策略"""
+        from src.context import get_strategy_manager
+        strategy_manager = get_strategy_manager()
+        logger.info("开始重置所有策略")
+        try:
+            strategy_manager.reset_all_for_new_day()
+            logger.info("所有策略已重置")
+        except Exception as e:
+            logger.error(f"重置策略失败: {e}")
