@@ -23,13 +23,13 @@
 
       <el-table :data="strategies" stripe v-loading="loading" table-layout="fixed">
         <el-table-column prop="strategy_id" label="策略ID" width="150" />
-        <el-table-column prop="config.strategy_type" label="策略类型" width="100">
+        <!-- <el-table-column prop="config.strategy_type" label="策略类型" width="100">
           <template #default="{ row }">
             <el-tag size="small">
               {{ row.config.strategy_type === 'bar' ? 'K线策略' : row.config.strategy_type === 'tick' ? 'Tick策略' : '混合策略' }}
             </el-tag>
           </template>
-        </el-table-column>
+        </el-table-column> -->
         <el-table-column prop="config.symbol" label="合约" width="120">
           <template #default="{ row }">
             {{ row.config.symbol || '-' }}

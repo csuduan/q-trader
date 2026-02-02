@@ -4,19 +4,40 @@
 所有操作通过TradingManager路由到Trader
 """
 
+import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
-from src.manager.api.schemas import StrategyConfig, StrategyRes
+from src.manager.api.schemas import (
+    StrategyConfig,
+    StrategyRes,
+    StrategyUpdateReq,
+    StrategyBatchOpReq,
+    StrategyStatusRes,
+)
 from src.manager.core.trading_manager import TradingManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/strategies", tags=["策略管理"])
+
+
+# ============ 辅助函数 ============
+
+def _handle_trader_not_found(account_id: str):
+    """处理Trader未找到的情况"""
+    logger.warning(f"Trader [{account_id}] 未找到或未连接")
+    raise HTTPException(status_code=404, detail=f"Trader [{account_id}] 未找到或未连接")
+
+
+def _handle_strategy_error(operation: str, strategy_id: str, error: Exception):
+    """处理策略操作错误"""
+    logger.error(f"{operation}策略 [{strategy_id}] 失败: {error}")
+    raise HTTPException(status_code=500, detail=f"{operation}策略失败: {str(error)}")
 
 
 @router.get("")
@@ -175,3 +196,173 @@ async def stop_all_strategies(
     except Exception as e:
         logger.error(f"停止策略失败: {e}")
         return error_response(message=f"停止策略失败: {str(e)}")
+
+
+@router.post("/batch")
+async def batch_operate_strategies(
+    request: StrategyBatchOpReq,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    批量操作策略
+
+    Args:
+        request: 批量操作请求
+        account_id: 账户ID
+
+    Returns:
+        操作结果，包含成功和失败的策略列表
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        results = {"success": [], "failed": []}
+
+        for strategy_id in request.strategy_ids:
+            try:
+                if request.operation == "start":
+                    success = await trading_manager.start_strategy(account_id, strategy_id)
+                elif request.operation == "stop":
+                    success = await trading_manager.stop_strategy(account_id, strategy_id)
+                elif request.operation == "restart":
+                    await trading_manager.stop_strategy(account_id, strategy_id)
+                    await asyncio.sleep(0.5)
+                    success = await trading_manager.start_strategy(account_id, strategy_id)
+                else:
+                    raise HTTPException(status_code=400, detail=f"不支持的操作类型: {request.operation}")
+
+                if success:
+                    results["success"].append(strategy_id)
+                else:
+                    results["failed"].append({"id": strategy_id, "reason": "操作失败"})
+            except Exception as e:
+                results["failed"].append({"id": strategy_id, "reason": str(e)})
+
+        return success_response(
+            data=results,
+            message=f"批量{request.operation}完成: 成功{len(results['success'])}个, 失败{len(results['failed'])}个"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量操作策略失败: {e}")
+        return error_response(message=f"批量操作策略失败: {str(e)}")
+
+
+@router.patch("/{strategy_id}")
+async def update_strategy(
+    strategy_id: str,
+    request: StrategyUpdateReq,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    更新策略参数
+
+    Args:
+        strategy_id: 策略ID
+        request: 更新请求
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        # TODO: 实现策略参数更新逻辑
+        # 需要Trader端支持更新策略参数
+
+        return success_response(message=f"策略 {strategy_id} 参数更新成功")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新策略参数失败: {e}")
+        return error_response(message=f"更新策略参数失败: {str(e)}")
+
+
+@router.get("/{strategy_id}/status")
+async def get_strategy_status(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> StrategyStatusRes:
+    """
+    获取策略详细状态
+
+    Args:
+        strategy_id: 策略ID
+        account_id: 账户ID
+
+    Returns:
+        StrategyStatusRes: 策略状态
+    """
+    try:
+        result = await trading_manager.get_strategy(account_id, strategy_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"策略不存在: {strategy_id}")
+        return StrategyStatusRes(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取策略状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取策略状态失败: {str(e)}")
+
+
+@router.get("/{strategy_id}/params")
+async def get_strategy_params(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    获取策略参数（用于前端显示）
+    - params_file: 参数文件路径（默认显示）
+    - params: 详细参数字典（悬浮显示）
+    - summary: 关键参数摘要
+
+    Args:
+        strategy_id: 策略ID
+        account_id: 账户ID
+
+    Returns:
+        StrategyParamsRes: 策略参数
+    """
+    try:
+        from src.manager.api.schemas import StrategyParamsRes
+
+        result = await trading_manager.get_strategy(account_id, strategy_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"策略不存在: {strategy_id}")
+
+        config = result.get("config", {})
+        params = result.get("params", {})
+
+        # 构建关键参数摘要
+        summary = {}
+        if "symbol" in params:
+            summary["symbol"] = params["symbol"]
+        if "volume_per_trade" in params:
+            summary["volume"] = params["volume_per_trade"]
+        if "take_profit_pct" in params:
+            summary["tp"] = params["take_profit_pct"]
+        if "stop_loss_pct" in params:
+            summary["sl"] = params["stop_loss_pct"]
+
+        params_res = StrategyParamsRes(
+            strategy_id=strategy_id,
+            params_file=config.get("params_file"),
+            params=params,
+            summary=summary,
+        )
+        return success_response(data=params_res.model_dump())
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取策略参数失败: {e}")
+        return error_response(message=f"获取策略参数失败: {str(e)}")

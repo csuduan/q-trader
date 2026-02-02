@@ -51,6 +51,16 @@ class SocketClient:
         self._pending_requests: Dict[str, asyncio.Future] = {}
         self._receiving_task: Optional[asyncio.Task] = None
 
+        # 重连相关
+        self._auto_reconnect = True
+        self._reconnect_interval = 3  # 重连间隔（秒）
+        self._max_reconnect_attempts = 0  # 0表示无限重连
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._connection_closed_by_server = False  # 标记连接是否被服务端关闭
+
+        # 连接断开回调
+        self._on_disconnect_callback: Optional[Callable[[], None]] = None
+
         logger.info(f"[Manager-{account_id}] Socket客户端初始化: {socket_path}")
 
     async def connect(self, retry_interval: int = 3, max_retries: int = 30) -> bool:
@@ -75,7 +85,7 @@ class SocketClient:
                 if register_msg and register_msg.get("type") == "register":
                     registered_account_id = register_msg.get("data", {}).get("account_id")
                     if registered_account_id == self.account_id:
-                        logger.info(f"[Trade Proxy-{self.account_id}] 注册确认成功")    
+                        logger.info(f"[Trade Proxy-{self.account_id}] 连接注册成功")    
                         # 启动消息接收循环
                         self._receiving_task = asyncio.create_task(self._receiving_loop())
                         return True
@@ -197,13 +207,30 @@ class SocketClient:
                 await self._handle_message(message)
 
             except asyncio.IncompleteReadError:
-                logger.info(f"[Manager-{self.account_id}] Trader关闭了连接")
+                logger.info(f"[Manager-{self.account_id}] Trader关闭了连接 (IncompleteReadError)")
+                break
+            except ConnectionResetError:
+                logger.warning(f"[Manager-{self.account_id}] 连接被重置 (ConnectionResetError)")
+                break
+            except ConnectionAbortedError:
+                logger.warning(f"[Manager-{self.account_id}] 连接被中止 (ConnectionAbortedError)")
                 break
             except Exception as e:
                 logger.error(f"[Manager-{self.account_id}] 接收消息时出错: {e}")
                 break
 
+        # 连接断开，更新状态
+        was_connected = self.connected
         self.connected = False
+
+        # 通知连接断开
+        if was_connected:
+            asyncio.create_task(self._notify_disconnection())
+
+        # 如果启用了自动重连，并且连接是被服务端关闭的，触发重连
+        if self._auto_reconnect and self._connection_closed_by_server:
+            logger.info(f"[Manager-{self.account_id}] 检测到连接断开，将尝试自动重连")
+            # 重连循环会在单独的task中处理
 
     async def _receive_message(self) -> Optional[Dict[str, Any]]:
         """
@@ -259,11 +286,13 @@ class SocketClient:
             # 这是响应消息
             future = self._pending_requests.pop(request_id, None)
             if future and not future.done():
-                data = message.get("data", {})
-                if message.get("status") == "error":
-                    future.set_exception(Exception(data.get("message", "请求失败")))
+                # data 可能为 None，需要处理
+                status = message.get("status")
+                message = message.get("message") or ""
+                if status == "error":
+                    future.set_exception(Exception(f"请求失败:{message}"))
                 else:
-                    future.set_result(data)
+                    future.set_result(message.get("data") or {})
             return
         else:
             # 这是推送消息
@@ -290,4 +319,95 @@ class SocketClient:
         Returns:
             是否连接
         """
-        return self.connected
+        # 检查连接状态并验证writer是否仍然有效
+        if not self.connected or not self.writer:
+            return False
+        # 检查writer是否已关闭
+        if self.writer.is_closing():
+            return False
+        return True
+
+    def set_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """
+        设置连接断开回调
+
+        Args:
+            callback: 连接断开时的回调函数
+        """
+        self._on_disconnect_callback = callback
+
+    async def _notify_disconnection(self) -> None:
+        """通知连接已断开"""
+        # 标记连接被服务端关闭
+        self._connection_closed_by_server = True
+
+        if self._on_disconnect_callback:
+            try:
+                if asyncio.iscoroutinefunction(self._on_disconnect_callback):
+                    await self._on_disconnect_callback()
+                else:
+                    self._on_disconnect_callback()
+            except Exception as e:
+                logger.error(f"[Manager-{self.account_id}] 执行断开回调时出错: {e}")
+
+    async def _reconnect_loop(self) -> None:
+        """
+        自动重连循环
+
+        当连接断开时，自动尝试重新连接
+        """
+        attempt = 0
+
+        while self._auto_reconnect:
+            if self.is_connected():
+                # 连接正常，等待一段时间后再次检查
+                await asyncio.sleep(1)
+                continue
+
+            # 检查是否达到最大重连次数
+            if self._max_reconnect_attempts > 0 and attempt >= self._max_reconnect_attempts:
+                logger.error(
+                    f"[Manager-{self.account_id}] 重连失败，已达到最大重连次数 "
+                    f"({self._max_reconnect_attempts})"
+                )
+                break
+
+            attempt += 1
+            logger.info(
+                f"[Manager-{self.account_id}] 尝试重新连接... ({attempt}/"
+                f"{self._max_reconnect_attempts if self._max_reconnect_attempts > 0 else '∞'})"
+            )
+
+            try:
+                # 尝试连接
+                success = await self.connect(
+                    retry_interval=self._reconnect_interval,
+                    max_retries=1  # 每次重连只尝试一次
+                )
+
+                if success:
+                    logger.info(f"[Manager-{self.account_id}] 重连成功")
+                    attempt = 0  # 重置重连计数
+                    # 通知重连成功
+                    self._connection_closed_by_server = False
+                else:
+                    logger.warning(f"[Manager-{self.account_id}] 重连失败，将在{self._reconnect_interval}秒后重试")
+                    await asyncio.sleep(self._reconnect_interval)
+
+            except Exception as e:
+                logger.error(f"[Manager-{self.account_id}] 重连时出错: {e}")
+                await asyncio.sleep(self._reconnect_interval)
+
+    def start_auto_reconnect(self) -> None:
+        """启动自动重连"""
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._auto_reconnect = True
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+            logger.info(f"[Manager-{self.account_id}] 已启动自动重连")
+
+    def stop_auto_reconnect(self) -> None:
+        """停止自动重连"""
+        self._auto_reconnect = False
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            logger.info(f"[Manager-{self.account_id}] 已停止自动重连")

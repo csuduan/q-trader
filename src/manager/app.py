@@ -16,9 +16,8 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import  Request, WebSocket, WebSocketDisconnect
-# FastAPI 不可用，使用标准 FastAPI
-from fastapi_offline import FastAPIOffline as FastAPI
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi_offline import FastAPIOffline
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -131,7 +130,7 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI应用实例
     """
-    app = FastAPI(
+    app = FastAPIOffline(
         title="Q-Trader自动化交易系统",
         description="Q-Trader自动化交易系统API",
         version="0.1.0",
@@ -257,7 +256,7 @@ def _register_routes(app: FastAPI) -> None:
                 logger.warning(f"路由模块 {module_name} 未找到 router 对象")
 
         except Exception as e:
-            logger.error(f"加载路由模块 {module_name} 失败: {e}")
+            logger.exception(f"加载路由模块 {module_name} 失败: {e}")
 
     logger.info(f"动态注册完成，共注册 {registered_count} 个路由模块")
 

@@ -16,14 +16,16 @@ export const strategyApi = {
    * 启动策略
    */
   startStrategy: async (strategyId: string, accountId?: string): Promise<void> => {
-    await api.post(`/strategies/${strategyId}/start`, { account_id: accountId })
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/start`, null, config)
   },
 
   /**
    * 停止策略
    */
   stopStrategy: async (strategyId: string, accountId?: string): Promise<void> => {
-    await api.post(`/strategies/${strategyId}/stop`, { account_id: accountId })
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/stop`, null, config)
   },
 
   /**
@@ -37,13 +39,15 @@ export const strategyApi = {
    * 启动所有策略
    */
   startAllStrategies: async (accountId?: string): Promise<void> => {
-    await api.post('/strategies/start-all', { account_id: accountId })
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post('/strategies/start-all', null, config)
   },
 
   /**
    * 停止所有策略
    */
   stopAllStrategies: async (accountId?: string): Promise<void> => {
-    await api.post('/strategies/stop-all', { account_id: accountId })
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post('/strategies/stop-all', null, config)
   }
 }

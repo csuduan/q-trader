@@ -225,8 +225,6 @@ class BaseGateway(ABC):
             dict[str, QuoteData]: 行情字典 {symbol: QuoteData}
         """
         pass
-
-
     
 
     # ==================== 数据推送（由子类调用）====================

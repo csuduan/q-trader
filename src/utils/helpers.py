@@ -1,8 +1,8 @@
 """
 辅助函数模块
 """
+from datetime import datetime, time
 
-from datetime import datetime
 
 
 def nanos_to_datetime_str(nanos: int) -> str:
@@ -61,3 +61,57 @@ def parse_symbol(symbol: str) -> tuple[str, str]:
     if len(parts) == 2:
         return parts[0], parts[1]
     return "", symbol
+
+def _get_float_param(config: dict, keys: list, default: float) -> float:
+    """获取浮点数参数（支持多个key）"""
+    for key in keys:
+        val = config.get(key)
+        if val is not None:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                continue
+    return default
+
+def _get_str_param(config: dict, keys: list, default: str) -> str:
+    """获取字符串参数（支持多个key）"""
+    for key in keys:
+        val = config.get(key)
+        if val is not None:
+            return str(val)
+    return default
+
+def _get_bool_param(config: dict, keys: list, default: bool) -> bool:
+    """获取布尔参数（支持多个key）"""
+    for key in keys:
+        val = config.get(key)
+        if val is not None:
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                return val.lower() in ("true", "1", "yes")
+            try:
+                return bool(int(val))
+            except (ValueError, TypeError):
+                continue
+    return default
+
+def _get_int_param(config: dict, keys: list, default: int) -> int:
+    """获取整数参数（支持多个key）"""
+    for key in keys:
+        val = config.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                continue
+    return default
+
+def _parse_time( time_str: str) -> time:
+    """解析时间字符串"""
+    try:
+        h, m, s = time_str.split(":")
+        return time(int(h), int(m), int(s))
+    except Exception as e:
+        logger.warning(f"时间解析失败: {time_str}, {e}")
+        return time(0, 0, 0)

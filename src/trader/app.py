@@ -65,7 +65,6 @@ async def main_async(args):
                 sys.exit(1)
             except OSError:
                 # 进程不存在，清理过期的PID文件
-                logger.info(f"清理过期的PID文件: {pid_file}")
                 pid_file.unlink(missing_ok=True)
         except Exception as e:
             logger.warning(f"检查PID文件失败: {e}")

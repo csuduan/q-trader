@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.utils.config_loader import TraderConfig
-from src.db.database import get_session
+from src.utils.database import get_session
 from src.models.po import AlarmPo as AlarmModel
 from src.trader.core.trading_engine import TradingEngine
 from src.trader.switch_mgr import SwitchPosManager

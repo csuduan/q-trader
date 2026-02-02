@@ -11,30 +11,40 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from src.manager.app import create_app
 from src.manager.core.trading_manager import TradingManager
 
 
 @pytest.fixture
-def app():
-    """创建测试应用"""
-    return create_app()
-
-
-@pytest.fixture
-def client(app):
-    """创建测试客户端"""
-    return TestClient(app)
-
-
-@pytest.fixture
 def mock_trading_manager():
     """模拟 TradingManager"""
-    mock = MagicMock(spec=TradingManager)
+    mock = MagicMock()
     mock.traders = {}
+    # Mock async methods that the routes will call
+    mock.start_trader = AsyncMock(return_value=True)
+    mock.stop_trader = AsyncMock(return_value=True)
+    # Mock get_trading_engine to return a mock engine with gateway property
+    mock_engine = MagicMock()
+    mock_engine.connect = AsyncMock(return_value=True)
+    mock_engine.disconnect = AsyncMock(return_value=True)
+    mock_engine.pause = AsyncMock(return_value=True)
+    mock_engine.resume = AsyncMock(return_value=True)
+    mock_engine.gateway = MagicMock()
+    mock_engine.gateway.connected = False
+    mock.get_trading_engine = MagicMock(return_value=mock_engine)
     return mock
+
+
+@pytest.fixture
+def client(mock_trading_manager):
+    """创建测试客户端并覆盖依赖注入"""
+    # Patch AppContext.get_trading_manager to return the mock
+    with patch('src.app_context.AppContext.get_trading_manager', return_value=mock_trading_manager):
+        app = create_app()
+        with TestClient(app) as test_client:
+            yield test_client
 
 
 class TestAccountTraderControl:
@@ -44,42 +54,40 @@ class TestAccountTraderControl:
         """测试成功启动Trader"""
         account_id = "test_account"
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            mock_trading_manager.start_trader = MagicMock(return_value=True)
+        mock_trading_manager.start_trader = AsyncMock(return_value=True)
 
-            response = client.post(f"/api/account/{account_id}/start")
+        response = client.post(f"/api/account/{account_id}/start")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["running"] is True
-            assert "Trader已启动" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["running"] is True
+        assert "Trader已启动" in response.json()["message"]
 
     def test_start_trader_failure(self, client, mock_trading_manager):
         """测试启动Trader失败"""
         account_id = "test_account"
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            mock_trading_manager.start_trader = MagicMock(return_value=False)
+        mock_trading_manager.start_trader = AsyncMock(return_value=False)
 
-            response = client.post(f"/api/account/{account_id}/start")
+        response = client.post(f"/api/account/{account_id}/start")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 500
-            assert "Trader启动失败" in response.json()["message"]
+        # error_response returns HTTP 400 with error code in body
+        assert response.status_code == 400
+        assert response.json()["code"] == 500
+        assert "Trader启动失败" in response.json()["message"]
 
     def test_stop_trader_success(self, client, mock_trading_manager):
         """测试成功停止Trader"""
         account_id = "test_account"
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            mock_trading_manager.stop_trader = MagicMock(return_value=True)
+        mock_trading_manager.stop_trader = AsyncMock(return_value=True)
 
-            response = client.post(f"/api/account/{account_id}/stop")
+        response = client.post(f"/api/account/{account_id}/stop")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["running"] is False
-            assert "Trader已停止" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["running"] is False
+        assert "Trader已停止" in response.json()["message"]
 
 
 class TestAccountGatewayControl:
@@ -96,16 +104,15 @@ class TestAccountGatewayControl:
         # 创建 mock engine
         mock_engine = MagicMock()
         mock_engine.gateway.connected = False
-        mock_engine.connect = MagicMock(return_value=True)
+        mock_engine.connect = AsyncMock(return_value=True)
         mock_trading_manager.get_trading_engine = MagicMock(return_value=mock_engine)
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/connect")
+        response = client.post(f"/api/account/{account_id}/connect")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["connected"] is True
-            assert "连接成功" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["connected"] is True
+        assert "连接成功" in response.json()["message"]
 
     def test_connect_gateway_already_connected(self, client, mock_trading_manager):
         """测试连接已连接的网关"""
@@ -120,13 +127,12 @@ class TestAccountGatewayControl:
         mock_engine.gateway.connected = True
         mock_trading_manager.get_trading_engine = MagicMock(return_value=mock_engine)
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/connect")
+        response = client.post(f"/api/account/{account_id}/connect")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["connected"] is True
-            assert "已连接" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["connected"] is True
+        assert "已连接" in response.json()["message"]
 
     def test_disconnect_gateway_success(self, client, mock_trading_manager):
         """测试成功断开网关"""
@@ -138,16 +144,15 @@ class TestAccountGatewayControl:
 
         # 创建 mock engine
         mock_engine = MagicMock()
-        mock_engine.disconnect = MagicMock()
+        mock_engine.disconnect = AsyncMock(return_value=True)
         mock_trading_manager.get_trading_engine = MagicMock(return_value=mock_engine)
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/disconnect")
+        response = client.post(f"/api/account/{account_id}/disconnect")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["connected"] is False
-            assert "已断开连接" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["connected"] is False
+        assert "已断开连接" in response.json()["message"]
 
 
 class TestAccountTradingControl:
@@ -159,16 +164,15 @@ class TestAccountTradingControl:
 
         # 创建 mock engine
         mock_engine = MagicMock()
-        mock_engine.pause = MagicMock()
+        mock_engine.pause = AsyncMock(return_value=True)
         mock_trading_manager.get_trading_engine = MagicMock(return_value=mock_engine)
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/pause")
+        response = client.post(f"/api/account/{account_id}/pause")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["paused"] is True
-            assert "交易已暂停" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["paused"] is True
+        assert "交易已暂停" in response.json()["message"]
 
     def test_resume_trading_success(self, client, mock_trading_manager):
         """测试成功恢复交易"""
@@ -176,16 +180,15 @@ class TestAccountTradingControl:
 
         # 创建 mock engine
         mock_engine = MagicMock()
-        mock_engine.resume = MagicMock()
+        mock_engine.resume = AsyncMock(return_value=True)
         mock_trading_manager.get_trading_engine = MagicMock(return_value=mock_engine)
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/resume")
+        response = client.post(f"/api/account/{account_id}/resume")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 0
-            assert response.json()["data"]["paused"] is False
-            assert "交易已恢复" in response.json()["message"]
+        assert response.status_code == 200
+        assert response.json()["code"] == 0
+        assert response.json()["data"]["paused"] is False
+        assert "交易已恢复" in response.json()["message"]
 
 
 class TestErrorHandling:
@@ -196,24 +199,24 @@ class TestErrorHandling:
         account_id = "non_existent_account"
         mock_trading_manager.traders = {}
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/connect")
+        response = client.post(f"/api/account/{account_id}/connect")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 404
-            assert "不存在" in response.json()["message"]
+        # error_response returns HTTP 400 with error code in body
+        assert response.status_code == 400
+        assert response.json()["code"] == 404
+        assert "不存在" in response.json()["message"]
 
     def test_pause_trading_engine_not_initialized(self, client, mock_trading_manager):
         """测试暂停交易时引擎未初始化"""
         account_id = "test_account"
         mock_trading_manager.get_trading_engine = MagicMock(return_value=None)
 
-        with patch('src.manager.api.routes.account.get_trading_manager', return_value=mock_trading_manager):
-            response = client.post(f"/api/account/{account_id}/pause")
+        response = client.post(f"/api/account/{account_id}/pause")
 
-            assert response.status_code == 200
-            assert response.json()["code"] == 500
-            assert "交易引擎未初始化" in response.json()["message"]
+        # error_response returns HTTP 400 with error code in body
+        assert response.status_code == 400
+        assert response.json()["code"] == 500
+        assert "交易引擎未初始化" in response.json()["message"]
 
 
 if __name__ == "__main__":

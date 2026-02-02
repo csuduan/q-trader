@@ -1,30 +1,10 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.manager.app import create_app
-from src.models.po import Base
 
 app = create_app()
-
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db_session():
-    """测试用数据库会话覆盖"""
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
 
 
 def mock_get_trading_manager():
@@ -40,15 +20,10 @@ def mock_get_trading_manager():
 @pytest.fixture(scope="module")
 def client():
     """创建测试客户端"""
-    # 创建测试数据库表
-    Base.metadata.create_all(bind=engine)
-
     # 覆盖依赖注入
     from src.manager.api import dependencies
-    original_get_db = dependencies.get_db_session
     original_get_tm = dependencies.get_trading_manager
 
-    dependencies.get_db_session = override_get_db_session
     dependencies.get_trading_manager = mock_get_trading_manager
 
     try:
@@ -56,10 +31,7 @@ def client():
             yield test_client
     finally:
         # 恢复原始依赖
-        dependencies.get_db_session = original_get_db
         dependencies.get_trading_manager = original_get_tm
-        # 清理数据库
-        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.mark.integration

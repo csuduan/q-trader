@@ -140,3 +140,16 @@ def close_database() -> None:
         _db.engine.dispose()
         _db = None
         logger.info("数据库连接已关闭")
+
+@contextmanager
+def session_scope():
+    """提供事务范围的上下文管理器"""
+    session = get_session()
+    try:
+        yield session
+        session.commit()
+    except:
+        session.rollback()
+        raise
+    finally:
+        session.close()

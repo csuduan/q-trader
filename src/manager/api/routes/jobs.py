@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from src.app_context import get_app_context
 from src.manager.api.responses import error_response, success_response
 from src.models.po import JobPo
-from src.scheduler import TaskScheduler
+from src.utils.scheduler import TaskScheduler
 from src.manager.core.trading_manager import TradingManager
 from src.manager.api.dependencies import get_trading_manager
 from src.utils.logger import get_logger

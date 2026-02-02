@@ -212,7 +212,7 @@ class TqGateway(BaseGateway):
 
             # 格式化合约代码
             std_symbols = [self._format_symbol(sym) for sym in self.hist_subs]
-            subscribe_symbols = [symbol for symbol in std_symbols if symbol not in self._quotes]
+            subscribe_symbols = [symbol for symbol in std_symbols if symbol and symbol not in self._quotes]
             if len(subscribe_symbols) == 0:
                 return True
             if self.api is None:
@@ -369,17 +369,14 @@ class TqGateway(BaseGateway):
             has_data = self.api.wait_update(time.time() + timeout)
             if has_data:
                 if self.api.is_changing(self._account):
-                    self._account = self.api.get_account()
                     self._emit_account(self._convert_account(self._account))
 
                 if self.api.is_changing(self._positions):
-                    self._positions = self.api.get_position()
                     for position in self._positions.values():
                         self._emit_position(self._convert_position(position))
 
-                if self.api.is_changing(self._quotes):
-                    self._quotes = self.api.get_quote()
-                    for quote in self._quotes.values():
+                for quote in self._quotes.values():
+                    if self.api.is_changing(quote):
                         self._emit_tick(self._convert_tick(quote))
 
                 if self.api.is_changing(self._orders):
@@ -388,7 +385,6 @@ class TqGateway(BaseGateway):
                         self._emit_order(self._convert_order(order))
 
                 if self.api.is_changing(self._trades):
-                    self._trades = self.api.get_trade()
                     for trade in self._trades.values():
                         self._emit_trade(self._convert_trade(trade))
 

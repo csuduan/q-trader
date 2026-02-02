@@ -15,17 +15,481 @@ from datetime import datetime, time
 from typing import Optional
 
 import numpy as np
+from pydantic import BaseModel
 
 from src.models.object import BarData, Offset
 from src.trader.strategy.base_strategy import BaseStrategy
+from src.utils.config_loader import StrategyConfig
 from src.utils.logger import get_logger
+from src.utils.helpers import _get_float_param, _get_bool_param, _get_str_param, _get_int_param, _parse_time
 
 logger = get_logger(__name__)
-
 
 # 数值计算精度控制
 EPS = 1e-12
 
+
+class RsiParam(BaseModel):
+    """RSI策略参数"""
+
+    symbol: str = ""
+    exchange: str = "DCE"
+    volume_per_trade: int = 1
+    max_position: int = 5
+    # RSI参数
+    rsi_n: int = 5  # RSI计算周期
+    short_k: int = 5  # 短K线周期（分钟）
+    long_k: int = 15  # 长K线周期（分钟）
+    # RSI阈值
+    long_threshold: float = 50.0  # 长RSI多头阈值 (对应原L)
+    short_threshold: float = 55.0  # 短RSI多头阈值 (对应原S)
+    # 交易时间窗口
+    day_start: time = time(9, 30, 0)  # K线锚点时间
+    trade_start_time: time = time(10, 0, 0)
+    trade_end_time: time = time(13, 25, 0)
+    force_exit_time: time = time(14, 55, 0)
+    # 风控参数
+    take_profit_pct: float = 0.015  # 止盈比例
+    stop_loss_pct: float = 0.015  # 止损比例
+    # 外部信号过滤
+    dir_thr: float = 0.0  # 信号方向阈值
+    use_signal: bool = True  # 是否使用外部信号
+    # 手续费率
+    fee_rate: float = 0.0001  # 每笔手续费率
+    # K线重采样锚点
+    anchor_time: time = time(9, 30, 0)
+
+
+class RsiStrategy(BaseStrategy):
+    """
+    RSI 策略
+    """
+
+    def __init__(self, strategy_id: str, strategy_config: StrategyConfig):
+        super().__init__(strategy_id, strategy_config)
+        logger.info(f"RSI策略 [{strategy_id}] 初始化完成")
+
+    def init(self) -> bool:
+        """策略初始化，将配置字典转换为RsiParam"""
+        logger.info(f"策略 [{self.strategy_id}] 初始化...")
+        self.inited = True
+        # 状态变量
+        self.close_prices: deque = deque(maxlen=500)  # 存储收盘价（用于计算RSI）
+        self.minute_bars: deque = deque(maxlen=1000)  # 1分钟K线缓存（用于K线重采样）
+        self.short_k_bars: deque = deque(maxlen=200)  # 短周期K线（short_k分钟）
+        self.long_k_bars: deque = deque(maxlen=100)  # 长周期K线（long_k分钟）
+        # 持仓状态
+        self.position_side = 0  # 持仓方向: 1多头, -1空头,0无持仓
+        self.position_volume = 0  # 当前持仓量
+        self.entry_price = 0.0  # 开仓价格
+        self.entry_bar_time = None  # 开仓K线时间
+        # 交易控制
+        self.last_trade_date =  datetime.now().strftime("%Y-%m-%d")  # 最后交易日期
+        self.pending_signal = None  # 待执行的信号（next-bar-open机制）
+        self.pending_side = 0  # 待执行的方向
+        self.signal_bar_time = None  # 信号产生的时间
+
+        # 收益统计
+        self.trade_count = 0  # 交易次数
+        self.total_pnl = 0.0  # 总盈亏
+
+        # 构建参数字典，支持CSV和YAML两种格式的参数名
+        # 注意：CSV中的列名可能是小写，这里需要兼容
+        param_dict = self.config.params
+        param_dict_for_rsi = {
+            "symbol": param_dict.get("symbol", ""),
+            "volume_per_trade": _get_int_param(param_dict, ["volume", "volume_per_trade"], 1),
+            "max_position": _get_int_param(param_dict, ["max_position"], 5),
+            # RSI参数（统一命名）
+            "rsi_n": _get_int_param(param_dict, ["rsi_n", "rsi_period"], 5),
+            "short_k": _get_int_param(param_dict, ["short_k", "short_kline_period"], 5),
+            "long_k": _get_int_param(param_dict, ["long_k", "long_kline_period"], 15),
+            "long_threshold": _get_float_param(param_dict, ["long_threshold", "L", "rsi_long_threshold"], 50.0),
+            "short_threshold": _get_float_param(param_dict, ["short_threshold", "S", "rsi_short_threshold"], 55.0),
+            # 交易时间
+            "trade_start_time": _parse_time(_get_str_param(param_dict, ["trade_start_time"], "10:00:00")),
+            "trade_end_time": _parse_time(_get_str_param(param_dict, ["trade_end_time"], "13:25:00")),
+            "force_exit_time": _parse_time(_get_str_param(param_dict, ["force_exit_time"], "14:55:00")),
+            "day_start": _parse_time(_get_str_param(param_dict, ["day_start"], "09:30:00")),
+            # 风控参数
+            "take_profit_pct": _get_float_param(param_dict, ["tp_ret", "take_profit_pct"], 0.015),
+            "stop_loss_pct": _get_float_param(param_dict, ["sl_ret", "stop_loss_pct"], 0.015),
+            # 外部信号参数
+            "dir_thr": _get_float_param(param_dict, ["dir_thr"], 0.0),
+            "use_signal": _get_bool_param(param_dict, ["used_signal", "use_signal"], True),
+            # 其他参数
+            "one_trade_per_day": _get_bool_param(param_dict, ["one_trade_per_day"], True),
+            "fee_rate": _get_float_param(param_dict, ["fee_rate"], 0.0001),
+        }
+        # 创建RsiParam实例
+        self.rsi_param = RsiParam(**param_dict_for_rsi)
+        # 更新合约代码
+        self.config.symbol = self.rsi_param.symbol
+
+        logger.info(f"策略 [{self.strategy_id}] 初始化完成")
+        return True
+
+    def get_params(self) -> dict:
+        """获取策略参数"""
+        return self.rsi_param.model_dump()
+    
+
+    def _is_in_trade_window(self, bar_time: time) -> bool:
+        """判断是否在交易窗口内"""
+        return self.rsi_param.trade_start_time <= bar_time < self.rsi_param.trade_end_time
+
+    def _is_force_exit_time(self, bar_time: time) -> bool:
+        """判断是否需要强制平仓"""
+        return bar_time >= self.rsi_param.force_exit_time
+
+    def _can_trade_today(self, bar: BarData) -> bool:
+        """判断今天是否可以交易"""
+        trade_date = bar.datetime.strftime("%Y-%m-%d")
+        return self.last_trade_date != trade_date
+
+    def _resample_kline(self, bar: BarData) -> tuple[BarData, BarData]:
+        """
+        K线重采样（09:30锚定）
+
+        Returns:
+            (short_k_bar, long_k_bar) 或 (None, None) 如果还不能形成K线
+        """
+        if not self.rsi_param:
+            return None, None
+
+        bar_time = bar.datetime.time()
+
+        # 计算分钟索引（从09:30开始）
+        minute_of_day = bar_time.hour * 60 + bar_time.minute
+        anchor_minute = self.rsi_param.day_start.hour * 60 + self.rsi_param.day_start.minute
+        min_idx = minute_of_day - anchor_minute
+
+        # 跳过09:30之前的数据
+        if min_idx < 0:
+            return None, None
+
+        # 存储1分钟K线
+        self.minute_bars.append({
+            'datetime': bar.datetime,
+            'open': bar.open_price,
+            'high': bar.high_price,
+            'low': bar.low_price,
+            'close': bar.close_price,
+            'volume': bar.volume,
+            'min_idx': min_idx,
+        })
+
+        # 检查是否可以形成新的短周期K线
+        short_k_idx = min_idx // self.rsi_param.short_k
+        long_k_idx = min_idx // self.rsi_param.long_k
+
+        # 短周期K线
+        short_bar = None
+        if len(self.minute_bars) >= 1:
+            # 找出当前short_k_idx的所有分钟K线
+            short_bars = [b for b in self.minute_bars if b['min_idx'] // self.rsi_param.short_k == short_k_idx]
+            if short_bars:
+                short_bar = BarData(
+                    symbol=bar.symbol,
+                    exchange=bar.exchange,
+                    datetime=short_bars[0]['datetime'],
+                    open_price=short_bars[0]['open'],
+                    high_price=max(b['high'] for b in short_bars),
+                    low_price=min(b['low'] for b in short_bars),
+                    close_price=short_bars[-1]['close'],
+                    volume=sum(b['volume'] for b in short_bars),
+                )
+
+        # 长周期K线
+        long_bar = None
+        if len(self.minute_bars) >= 1:
+            long_bars = [b for b in self.minute_bars if b['min_idx'] // self.rsi_param.long_k == long_k_idx]
+            if long_bars:
+                long_bar = BarData(
+                    symbol=bar.symbol,
+                    exchange=bar.exchange,
+                    datetime=long_bars[0]['datetime'],
+                    open_price=long_bars[0]['open'],
+                    high_price=max(b['high'] for b in long_bars),
+                    low_price=min(b['low'] for b in long_bars),
+                    close_price=long_bars[-1]['close'],
+                    volume=sum(b['volume'] for b in long_bars),
+                )
+
+        return short_bar, long_bar
+
+
+    
+
+    def on_tick(self, tick):
+        """Tick行情回调（暂不使用）"""
+        pass
+
+    def on_bar(self, bar: BarData):
+        """K线行情回调"""
+        if not self.active or not self.rsi_param:
+            return
+
+        try:
+            # 只处理指定合约的K线
+            if bar.symbol != self.rsi_param.symbol:
+                return
+
+            bar_time = bar.datetime.time()
+            # K线重采样（09:30锚定）
+            short_bar, long_bar = self._resample_kline(bar)
+            if short_bar is None or long_bar is None:
+                return
+
+            # 获取重采样后K线的时间
+            short_time = short_bar.datetime.time()
+
+            # 强制平仓检查（使用原始K线时间）
+            if self.position_side != 0 and self._is_force_exit_time(bar_time):
+                self._close_position("FORCE_EXIT", bar)
+                return
+
+            # 止盈止损检查
+            if self.position_side != 0:
+                exit_reason = self._check_exit_conditions(bar.close_price)
+                if exit_reason:
+                    self._close_position(exit_reason, bar)
+                    return
+
+            # 检查交易窗口（使用重采样后的短K线时间）
+            if not self._is_in_trade_window(short_time):
+                return
+
+            # 检查每天只能交易一次
+            if  self.trade_count > 0:
+                return
+            
+            # 计算RSI并生成信号
+            signal= self._generate_signal(short_bar, long_bar)
+            # 检查信号有效性
+            if signal == 0 or not self._check_external_signal_filter(signal):
+                return
+
+            self._open_position(signal, short_bar.open_price, short_bar)
+        except Exception as e:
+            logger.error(f"策略 [{self.strategy_id}] on_bar 异常: {e}", exc_info=True)
+
+    def _generate_signal(self, short_bar: BarData, long_bar: BarData) -> int:
+        """
+        生成交易信号
+
+        Args:
+            short_bar: 短周期K线
+            long_bar: 长周期K线
+
+        Returns:
+            signal: 交易信号 (1-开多 -1-开空 0-无信号)
+        """
+        # 使用K线收盘价计算RSI
+        # 需要足够的历史数据
+        min_bars_needed = self.rsi_param.rsi_n + 1
+
+        # 短周期RSI计算
+        if len(self.short_k_bars) < min_bars_needed:
+            return 0
+        short_prices = [b.close_price for b in list(self.short_k_bars)[-min_bars_needed:]]
+        rsi_short = calc_rsi_sma(short_prices, self.rsi_param.rsi_n)
+
+        # 长周期RSI计算
+        if len(self.long_k_bars) < min_bars_needed:
+            return 0
+        long_prices = [b.close_price for b in list(self.long_k_bars)[-min_bars_needed:]]
+        rsi_long = calc_rsi_sma(long_prices, self.rsi_param.rsi_n)
+
+        if not np.isfinite(rsi_short) or not np.isfinite(rsi_long):
+            return 0
+
+        # 多头信号：长周期RSI > long_threshold 且 短周期RSI > short_threshold
+        if rsi_long > self.rsi_param.long_threshold and rsi_short > self.rsi_param.short_threshold:
+            logger.debug(f"RSI多头信号: rsi_long={rsi_long:.2f}, rsi_short={rsi_short:.2f}")
+            return 1
+
+        # 空头信号：长周期RSI < (100-long_threshold) 且 短周期RSI < (100-short_threshold)
+        if rsi_long < (100 - self.rsi_param.long_threshold) and rsi_short < (100 - self.rsi_param.short_threshold):
+            logger.debug(f"RSI空头信号: rsi_long={rsi_long:.2f}, rsi_short={rsi_short:.2f}")
+            return -1
+
+        return 0
+
+
+    def _check_external_signal_filter(self, side: int) -> bool:
+        """
+        检查外部信号方向过滤
+
+        Args:
+            side: 交易方向 (1多头, -1空头)
+
+        Returns:
+            bool: 是否通过过滤
+        """
+        if not self.rsi_param or not self.rsi_param.use_signal:
+            return True
+
+        ext_signal = self.rsi_param.use_signal
+        dir_thr = self.rsi_param.dir_thr
+
+        # 根据阈值确定外部方向
+        if ext_signal >= dir_thr:
+            ext_dir = 1
+        elif ext_signal <= -dir_thr:
+            ext_dir = -1
+        else:
+            ext_dir = 0
+
+        # 检查是否匹配
+        if ext_dir == 0:
+            # 信号方向为0，当天不交易
+            logger.debug(f"策略 [{self.strategy_id}] 外部信号为0，不交易")
+            return False
+
+        if ext_dir != side:
+            # 方向不匹配
+            logger.debug(f"策略 [{self.strategy_id}] 方向不匹配: RSI方向={side}, 外部方向={ext_dir}")
+            return False
+
+        return True
+
+    def _open_position(self, side: int, price: float, bar: BarData):
+        """
+        开仓
+
+        Args:
+            side: 1多头, -1空头
+            price: 入场价格
+            bar: 当前K线
+        """
+        if not self.rsi_param:
+            return
+
+        try:
+            if side == 1:
+                # 开多仓
+                order_id = self.buy(
+                    symbol=f"{self.rsi_param.symbol}.{self.rsi_param.exchange}",
+                    volume=self.rsi_param.volume_per_trade,
+                    price=price,
+                    offset=Offset.OPEN,
+                )
+                if order_id:
+                    self.position_side = 1
+                    self.entry_price = price
+                    self.entry_bar_time = bar.datetime
+                    self.trade_count += 1
+                    logger.info(f"开多仓: price={price}, order_id={order_id}")
+            elif side == -1:
+                # 开空仓
+                order_id = self.sell(
+                    symbol=f"{self.rsi_param.symbol}.{self.rsi_param.exchange}",
+                    volume=self.rsi_param.volume_per_trade,
+                    price=price,
+                    offset=Offset.OPEN,
+                )
+                if order_id:
+                    self.position_side = -1
+                    self.entry_price = price
+                    self.entry_bar_time = bar.datetime
+                    self.trade_count += 1
+                    logger.info(f"开空仓: price={price}, order_id={order_id}")
+        except Exception as e:
+            logger.error(f"执行交易失败: {e}", exc_info=True)
+
+    def _close_position(self, reason: str, bar: BarData):
+        """
+        平仓
+
+        Args:
+            reason: 平仓原因 (TP/SL/FORCE_EXIT/EXIT_TIME)
+            bar: 当前K线
+        """
+        if self.position_side == 0:
+            return
+
+        try:
+            exit_price = bar.close_price
+            symbol = f"{self.rsi_param.symbol}.{self.rsi_param.exchange}"
+            volume = self.rsi_param.volume_per_trade
+
+            if self.position_side == 1:
+                # 平多仓 (卖出平仓)
+                order_id = self.sell(symbol=symbol, volume=volume, price=exit_price, offset=Offset.CLOSE)
+            else:
+                # 平空仓 (买入平仓)
+                order_id = self.buy(symbol=symbol, volume=volume, price=exit_price, offset=Offset.CLOSE)
+
+            # 计算盈亏
+            if self.position_side == 1:
+                pnl = (exit_price - self.entry_price) * volume
+            else:
+                pnl = (self.entry_price - exit_price) * volume
+
+            self.total_pnl += pnl
+
+            logger.info(
+                f"平仓 [{reason}]: side={self.position_side}, entry={self.entry_price:.2f}, "
+                f"exit={exit_price:.2f}, pnl={pnl:.2f}, order_id={order_id}"
+            )
+
+            # 重置持仓状态
+            self.position_side = 0
+            self.entry_price = 0.0
+            self.entry_bar_time = None
+            self.pending_signal = None
+            self.pending_side = 0
+            self.signal_bar_time = None
+
+        except Exception as e:
+            logger.error(f"平仓失败: {e}", exc_info=True)
+
+    def _check_exit_conditions(self, current_price: float) -> str:
+        """
+        检查止盈止损条件
+
+        Args:
+            current_price: 当前价格
+
+        Returns:
+            退出原因 ("TP"/"SL"/None)
+        """
+        if self.position_side == 0 or not self.rsi_param:
+            return None
+
+        entry_price = self.entry_price
+
+        if self.position_side == 1:
+            # 多头仓位
+            profit_pct = (current_price - entry_price) / entry_price
+            if profit_pct >= self.rsi_param.take_profit_pct:
+                return "TP"
+            if profit_pct <= -self.rsi_param.stop_loss_pct:
+                return "SL"
+        else:
+            # 空头仓位
+            profit_pct = (entry_price - current_price) / entry_price
+            if profit_pct >= self.rsi_param.take_profit_pct:
+                return "TP"
+            if profit_pct <= -self.rsi_param.stop_loss_pct:
+                return "SL"
+
+        return None
+
+    def _is_exit_time(self, bar_time: time) -> bool:
+        """
+        判断是否超出交易时间（用于阻止新的入场）
+
+        Args:
+            bar_time: K线时间
+
+        Returns:
+            bool: 是否超出交易时间
+        """
+        if not self.rsi_param:
+            return True
+        return bar_time >= self.rsi_param.trade_end_time
 
 def roll_mean_right(values: list, n: int) -> float:
     """右对齐滚动均值（忽略非有限值）"""
@@ -78,381 +542,3 @@ def calc_rsi_sma(values: list, n: int) -> float:
 
     # 转换为RSI值
     return 100.0 * RS / (1.0 + RS)
-
-
-class RsiStrategy(BaseStrategy):
-    """
-    RSI 策略
-
-    策略参数（从配置文件读取）:
-    CSV参数: StrategyId, Product, TradingDay, Symbol, StartTime, EndTime, ForceExitTime, TpRet, SlRet, DirThr, UsedSignal
-    YAML参数: symbol, exchange, volume_per_trade, rsi_period, take_profit_pct, stop_loss_pct, 等
-
-    CSV参数会覆盖YAML中同名参数
-    """
-
-    def __init__(self, strategy_id: str, config: dict):
-        super().__init__(strategy_id, config)
-
-        # 从配置读取参数（支持CSV和YAML两种格式）
-        self.symbol = config.get("symbol", "")
-        self.exchange = config.get("exchange", "DCE")
-        self.volume_per_trade = config.get("volume_per_trade", 1)
-        self.max_position = config.get("max_position", 5)
-
-        # RSI参数
-        self.rsi_period = config.get("rsi_period", 14)
-        self.rsi_long_threshold = config.get("rsi_long_threshold", 50)
-        self.rsi_short_threshold = config.get("rsi_short_threshold", 80)
-
-        # K线周期参数
-        self.short_kline_period = config.get("short_kline_period", 5)
-        self.long_kline_period = config.get("long_kline_period", 15)
-
-        # 止盈止损（支持CSV的TpRet/SlRet和YAML的take_profit_pct/stop_loss_pct）
-        self.take_profit_pct = self._get_float_param(config, ["TpRet", "take_profit_pct"], 0.02)
-        self.stop_loss_pct = self._get_float_param(config, ["SlRet", "stop_loss_pct"], 0.01)
-
-        # 交易窗口（支持CSV的StartTime/EndTime/ForceExitTime和YAML的trade_start_time等）
-        self.trade_start_time = self._parse_time(
-            self._get_str_param(config, ["StartTime", "trade_start_time"], "09:30:00")
-        )
-        self.trade_end_time = self._parse_time(
-            self._get_str_param(config, ["EndTime", "trade_end_time"], "14:50:00")
-        )
-        self.force_exit_time = self._parse_time(
-            self._get_str_param(config, ["ForceExitTime", "force_exit_time"], "14:55:00")
-        )
-
-        # 方向阈值（CSV参数）
-        self.dir_threshold = self._get_float_param(config, ["DirThr", "dir_threshold"], 0.0)
-
-        # 是否使用信号（CSV参数）
-        self.used_signal = self._get_bool_param(config, ["UsedSignal", "used_signal"], True)
-
-        # 交易限制
-        self.one_trade_per_day = config.get("one_trade_per_day", True)
-
-        # 状态变量
-        self.close_prices: deque = deque(maxlen=500)  # 存储收盘价
-        self.short_bar_buffer: list = []  # 短周期K线缓存
-        self.long_bar_buffer: list = []  # 长周期K线缓存
-
-        self.holding = False  # 是否持仓
-        self.position_side = 0  # 持仓方向: 1多头, -1空头
-        self.entry_price = 0.0  # 开仓价格
-        self.entry_bar_time = None  # 开仓K线时间
-
-        self.last_trade_date = None  # 最后交易日期
-
-        logger.info(f"RSI策略 [{strategy_id}] 初始化完成，参数: {config}")
-
-    def _get_float_param(self, config: dict, keys: list, default: float) -> float:
-        """获取浮点数参数（支持多个key）"""
-        for key in keys:
-            val = config.get(key)
-            if val is not None:
-                try:
-                    return float(val)
-                except (ValueError, TypeError):
-                    continue
-        return default
-
-    def _get_str_param(self, config: dict, keys: list, default: str) -> str:
-        """获取字符串参数（支持多个key）"""
-        for key in keys:
-            val = config.get(key)
-            if val is not None:
-                return str(val)
-        return default
-
-    def _get_bool_param(self, config: dict, keys: list, default: bool) -> bool:
-        """获取布尔参数（支持多个key）"""
-        for key in keys:
-            val = config.get(key)
-            if val is not None:
-                if isinstance(val, bool):
-                    return val
-                if isinstance(val, str):
-                    return val.lower() in ("true", "1", "yes")
-                try:
-                    return bool(int(val))
-                except (ValueError, TypeError):
-                    continue
-        return default
-
-    def _parse_time(self, time_str: str) -> time:
-        """解析时间字符串"""
-        try:
-            h, m, s = time_str.split(":")
-            return time(int(h), int(m), int(s))
-        except Exception as e:
-            logger.warning(f"时间解析失败: {time_str}, {e}")
-            return time(0, 0, 0)
-
-    def _is_in_trade_window(self, bar_time: time) -> bool:
-        """判断是否在交易窗口内"""
-        return self.trade_start_time <= bar_time < self.trade_end_time
-
-    def _is_force_exit_time(self, bar_time: time) -> bool:
-        """判断是否需要强制平仓"""
-        return bar_time >= self.force_exit_time
-
-    def _get_trade_date(self, bar: BarData) -> str:
-        """获取交易日期"""
-        return bar.datetime.strftime("%Y-%m-%d")
-
-    def _can_trade_today(self, bar: BarData) -> bool:
-        """判断今天是否可以交易"""
-        if not self.one_trade_per_day:
-            return True
-        trade_date = self._get_trade_date(bar)
-        return self.last_trade_date != trade_date
-
-    def init(self) -> bool:
-        """策略初始化"""
-        logger.info(f"策略 [{self.strategy_id}] 初始化...")
-        self.inited = True
-        return True
-
-    def reset_for_new_day(self) -> bool:
-        """
-        每日开盘重置策略状态
-
-        清除昨日的信号、持仓状态、中间变量等
-        """
-        logger.info(f"策略 [{self.strategy_id}] 每日重置...")
-
-        # 重置状态变量
-        self.close_prices.clear()
-        self.short_bar_buffer.clear()
-        self.long_bar_buffer.clear()
-
-        # 重置交易状态
-        self.holding = False
-        self.position_side = 0
-        self.entry_price = 0.0
-        self.entry_bar_time = None
-
-        # 重置交易日期
-        self.last_trade_date = None
-
-        logger.info(f"策略 [{self.strategy_id}] 每日重置完成")
-        return True
-
-    def on_tick(self, tick):
-        """Tick行情回调（暂不使用）"""
-        pass
-
-    def on_bar(self, bar: BarData):
-        """K线行情回调"""
-        if not self.active:
-            return
-
-        try:
-            # 只处理指定合约的K线
-            if bar.symbol != self.symbol or bar.exchange.value != self.exchange:
-                return
-
-            bar_time = bar.datetime.time()
-
-            # 存储收盘价
-            self.close_prices.append(bar.close_price)
-
-            # 强制平仓检查
-            if self.holding and self._is_force_exit_time(bar_time):
-                self._close_position("FORCE_EXIT")
-                return
-
-            # 止盈止损检查
-            if self.holding:
-                exit_reason = self._check_exit_conditions(bar.close_price)
-                if exit_reason:
-                    self._close_position(exit_reason)
-                    return
-
-            # 检查交易窗口
-            if not self._is_in_trade_window(bar_time):
-                return
-
-            # 检查数据是否足够
-            if len(self.close_prices) < self.long_kline_period + self.rsi_period:
-                return
-
-            # 计算RSI并生成信号
-            signal = self._generate_signal()
-
-            # 执行交易
-            if signal != 0 and not self.holding:
-                if self._can_trade_today(bar):
-                    self._execute_signal(signal, bar)
-
-        except Exception as e:
-            logger.error(f"策略 [{self.strategy_id}] on_bar 异常: {e}", exc_info=True)
-
-    def _generate_signal(self) -> int:
-        """
-        生成交易信号
-
-        Returns:
-            int: 1=多头信号, -1=空头信号, 0=无信号
-        """
-        # 计算短周期RSI
-        short_period = min(self.short_kline_period, len(self.close_prices))
-        short_prices = list(self.close_prices)[-short_period:]
-        rsi_short = calc_rsi_sma(short_prices, self.rsi_period)
-
-        # 计算长周期RSI
-        long_period = min(self.long_kline_period, len(self.close_prices))
-        long_prices = list(self.close_prices)[-long_period:]
-        rsi_long = calc_rsi_sma(long_prices, self.rsi_period)
-
-        if not np.isfinite(rsi_short) or not np.isfinite(rsi_long):
-            return 0
-
-        # 多头信号：长周期RSI超卖且短周期RSI极度超卖
-        if rsi_long > self.rsi_long_threshold and rsi_short > self.rsi_short_threshold:
-            logger.info(f"RSI多头信号: rsi_long={rsi_long:.2f}, rsi_short={rsi_short:.2f}")
-            return 1
-
-        # 空头信号：长周期RSI超买且短周期RSI极度超买
-        if rsi_long < (100 - self.rsi_long_threshold) and rsi_short < (
-            100 - self.rsi_short_threshold
-        ):
-            logger.info(f"RSI空头信号: rsi_long={rsi_long:.2f}, rsi_short={rsi_short:.2f}")
-            return -1
-
-        return 0
-
-    def _execute_signal(self, signal: int, bar: BarData):
-        """
-        执行交易信号
-
-        Args:
-            signal: 1=多头, -1=空头
-            bar: 当前K线
-        """
-        # 检查是否使用信号
-        if not self.used_signal:
-            logger.debug(f"策略 [{self.strategy_id}] UsedSignal=False，跳过信号")
-            return
-
-        try:
-            if signal == 1:
-                # 开多仓
-                order_id = self.buy(
-                    symbol=f"{self.symbol}.{self.exchange}",
-                    volume=self.volume_per_trade,
-                    price=bar.close_price,
-                    offset=Offset.OPEN,
-                )
-                if order_id:
-                    self.holding = True
-                    self.position_side = 1
-                    self.entry_price = bar.close_price
-                    self.entry_bar_time = bar.datetime
-                    self.last_trade_date = self._get_trade_date(bar)
-                    logger.info(f"开多仓: price={bar.close_price}, order_id={order_id}")
-
-            elif signal == -1:
-                # 开空仓
-                order_id = self.sell(
-                    symbol=f"{self.symbol}.{self.exchange}",
-                    volume=self.volume_per_trade,
-                    price=bar.close_price,
-                    offset=Offset.OPEN,
-                )
-                if order_id:
-                    self.holding = True
-                    self.position_side = -1
-                    self.entry_price = bar.close_price
-                    self.entry_bar_time = bar.datetime
-                    self.last_trade_date = self._get_trade_date(bar)
-                    logger.info(f"开空仓: price={bar.close_price}, order_id={order_id}")
-
-        except Exception as e:
-            logger.error(f"执行交易信号失败: {e}", exc_info=True)
-
-    def _check_exit_conditions(self, current_price: float) -> Optional[str]:
-        """
-        检查止盈止损条件
-
-        Returns:
-            Optional[str]: 止盈原因，None表示不触发
-        """
-        if not self.holding or self.entry_price <= 0:
-            return None
-
-        # 计算收益率
-        ret = self.position_side * (current_price / self.entry_price - 1.0)
-
-        # 止盈
-        if ret >= self.take_profit_pct:
-            logger.info(
-                f"触发止盈: entry={self.entry_price}, current={current_price}, ret={ret:.4f}"
-            )
-            return "TAKE_PROFIT"
-
-        # 止损
-        if ret <= -self.stop_loss_pct:
-            logger.info(
-                f"触发止损: entry={self.entry_price}, current={current_price}, ret={ret:.4f}"
-            )
-            return "STOP_LOSS"
-
-        return None
-
-    def _close_position(self, reason: str):
-        """平仓"""
-        if not self.holding:
-            return
-
-        try:
-            # 确定平仓方向
-            if self.position_side == 1:
-                # 平多仓
-                order_id = self.sell(
-                    symbol=f"{self.symbol}.{self.exchange}",
-                    volume=self.volume_per_trade,
-                    price=None,  # 市价平仓
-                    offset=Offset.CLOSE,
-                )
-            else:
-                # 平空仓
-                order_id = self.buy(
-                    symbol=f"{self.symbol}.{self.exchange}",
-                    volume=self.volume_per_trade,
-                    price=None,  # 市价平仓
-                    offset=Offset.CLOSE,
-                )
-
-            if order_id:
-                logger.info(
-                    f"平仓成功: reason={reason}, side={self.position_side}, order_id={order_id}"
-                )
-
-            # 重置状态
-            self.holding = False
-            self.position_side = 0
-            self.entry_price = 0.0
-            self.entry_bar_time = None
-
-        except Exception as e:
-            logger.error(f"平仓失败: {e}", exc_info=True)
-
-    def on_order(self, order):
-        """订单状态回调"""
-        logger.debug(f"策略 [{self.strategy_id}] 订单更新: {order.order_id} status={order.status}")
-
-    def on_trade(self, trade):
-        """成交回调"""
-        logger.info(
-            f"策略 [{self.strategy_id}] 成交: {trade.trade_id} {trade.symbol} "
-            f"{trade.direction.value} {trade.volume} @{trade.price}"
-        )
-
-
-# 策略工厂函数，用于动态加载
-def create_strategy(strategy_id: str, config: dict) -> RsiStrategy:
-    """创建RSI策略实例"""
-    return RsiStrategy(strategy_id, config)

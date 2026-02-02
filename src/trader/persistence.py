@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.app_context import get_app_context
-from src.db.database import get_session
+from src.utils.database import get_session
 from src.models.object import AccountData, OrderData, PositionData, TradeData
 from src.models.po import AccountPo, OrderPo, PositionPo, TradePo
 from src.utils.event_engine import EventEngine, EventTypes, HandlerType

@@ -74,7 +74,7 @@ class AsyncEventEngine:
                         try:
                             handler(event.data)
                         except Exception as e:
-                            logger.error(f"[{self._name}] 同步处理器执行失败: {e}")
+                            logger.exception(f"[{self._name}] 同步处理器执行失败: {e}")
 
                 if tasks:
                     # 等待所有异步任务完成

@@ -23,9 +23,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, cast
 
 from src.app_context import AppContext, get_app_context
-from src.scheduler import Job
+from src.utils.scheduler import Job
 from src.utils.config_loader import AccountConfig, AppConfig
-from src.manager.core.socket_client import SocketClient
+from src.utils.ipc import SocketClient
 from src.models.object import AccountData, OrderData, PositionData, TradeData, TickData
 from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
@@ -672,6 +672,103 @@ class TraderProxy:
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 订阅请求失败: {e}")
             return False
+
+    # ==================== 网关控制接口 ====================
+
+    async def connect(self) -> bool:
+        """
+        连接网关（异步接口，用于路由）
+
+        通过socket发送连接请求到远程Trader
+
+        Returns:
+            是否成功发送请求
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送连接请求")
+            return False
+
+        try:
+            response:bool = await self.socket_client.request("connect_gateway", {}, timeout=10.0)
+            return response or False
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 连接网关请求失败: {e}")
+            return False
+
+    async def disconnect(self) -> bool:
+        """
+        断开网关（异步接口，用于路由）
+
+        通过socket发送断开请求到远程Trader
+
+        Returns:
+            是否成功发送请求
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.warning(f"TraderProxy [{self.account_id}] 未连接到Trader")
+            return False
+
+        try:
+            response:bool = await self.socket_client.request("disconnect_gateway", {}, timeout=10.0)
+            return response or False
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 断开网关请求失败: {e}")
+            return False
+
+    async def pause(self) -> bool:
+        """
+        暂停交易（异步接口，用于路由）
+
+        通过socket发送暂停请求到远程Trader
+
+        Returns:
+            是否成功发送请求
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送暂停请求")
+            return False
+
+        try:
+            response:bool = await self.socket_client.request("pause_trading", {}, timeout=10.0)
+            return response or False
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 暂停交易请求失败: {e}")
+            return False
+
+    async def resume(self) -> bool:
+        """
+        恢复交易（异步接口，用于路由）
+
+        通过socket发送恢复请求到远程Trader
+
+        Returns:
+            是否成功发送请求
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送恢复请求")
+            return False
+
+        try:
+            response:bool = await self.socket_client.request("resume_trading", {}, timeout=10.0)
+            return response or False
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 恢复交易请求失败: {e}")
+            return False
+
+    @property
+    def gateway(self) -> "_GatewayStatus":
+        """网关状态（用于兼容路由代码）"""
+        return self._GatewayStatus(self)
+
+    class _GatewayStatus:
+        """网关状态包装类"""
+        def __init__(self, proxy: "TraderProxy"):
+            self._proxy = proxy
+
+        @property
+        def connected(self) -> bool:
+            """是否已连接到网关"""
+            return self._proxy._is_state(TraderState.CONNECTED)
     # ==================== 辅助方法 ====================
 
     async def restart(self) -> bool:

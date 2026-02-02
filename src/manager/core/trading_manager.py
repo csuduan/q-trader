@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from src.utils.config_loader import AccountConfig, DatabaseConfig, SocketConfig
 from src.manager.core.trader_proxy import TraderProxy
 from src.models.object import Direction, Offset, OrderData, OrderRequest, AccountData
-from src.scheduler import TaskScheduler
+from src.utils.scheduler import TaskScheduler
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -264,85 +264,6 @@ class TradingManager:
             statuses.append(trader.get_status())
         return statuses
 
-    def update_heartbeat(self, account_id: str) -> None:
-        """
-        更新心跳时间
-
-        Args:
-            account_id: 账户ID
-        """
-        trader = self.traders.get(account_id)
-        if trader:
-            trader._update_heartbeat()
-
-    async def start_health_check(self, interval: int = 10, timeout: int = 30) -> None:
-        """
-        启动健康检查循环
-
-        Args:
-            interval: 检查间隔（秒）
-            timeout: 心跳超时（秒）
-        """
-        self._health_check_running = True
-        self._health_check_task = asyncio.create_task(self._health_check_loop(interval, timeout))
-        logger.info("健康检查循环已启动")
-
-    async def stop_health_check(self) -> None:
-        """停止健康检查循环"""
-        self._health_check_running = False
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            try:
-                await self._health_check_task
-            except asyncio.CancelledError:
-                pass
-        logger.info("健康检查循环已停止")
-
-    async def _health_check_loop(self, interval: int, timeout: int) -> None:
-        """
-        健康检查循环
-
-        Args:
-            interval: 检查间隔（秒）
-            timeout: 心跳超时（秒）
-        """
-        while self._health_check_running:
-            try:
-                await asyncio.sleep(interval)
-                await self._check_health(timeout)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"健康检查出错: {e}")
-
-    async def _check_health(self, timeout: int) -> None:
-        """
-        检查所有Trader健康状态
-
-        Args:
-            timeout: 心跳超时（秒）
-        """
-        now = datetime.now()
-
-        for account_id, trader in list(self.traders.items()):
-            # 检查连接状态，如果断开则重连
-            await trader._check_connection_and_reconnect()
-
-            # 检查心跳超时
-            if not trader.is_running():
-                continue
-
-            try:
-                await trader.ping()
-                heartbeat_age = (now - trader.last_heartbeat).total_seconds()
-                if heartbeat_age > timeout:
-                    logger.warning(
-                        f"Trader [{account_id}] 心跳超时 ({heartbeat_age:.1f}秒)"
-                    )
-            except Exception as e:
-                logger.error(f"Trader [{account_id}] 心跳检查失败: {e}")
-
     # ==================== 交易接口 ====================
 
     async def send_order_request(
@@ -447,6 +368,7 @@ class TradingManager:
         """获取Trader实例"""
         return self.traders.get(account_id)
 
+
     async def get_order(self, account_id: str, order_id: str) -> Optional[Any]:
         """获取订单数据"""
         trader = self.traders.get(account_id)
@@ -512,7 +434,8 @@ class TradingManager:
         """获取策略列表"""
         trader = self.traders.get(account_id)
         if trader:
-            return await trader.send_request("list_strategies", {})
+            strategies = await trader.send_request("list_strategies", {})
+            return strategies if strategies is not None else []
         return []
 
     async def get_strategy(self, account_id: str, strategy_id: str) -> Optional[dict]:
@@ -711,11 +634,6 @@ class TradingManager:
                 else:
                     logger.error(f"Trader Proxy [{account.account_id}] 启动失败")
 
-        # 启动健康检查
-        await self.start_health_check(
-            interval=self.socket_config.health_check_interval,
-            timeout=self.socket_config.heartbeat_timeout,
-        )
 
         logger.info("交易管理器启动完成")
 

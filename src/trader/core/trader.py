@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Optional, Dict, Callable, Any
 
 from src.app_context import AppContext, get_app_context
+from src.trader.strategy import BaseStrategy
 from src.utils.config_loader import TraderConfig
 from src.job_mgr import JobManager
-from src.scheduler import TaskScheduler
-from src.trader.core.socket_server import SocketServer, request
+from src.utils.scheduler import TaskScheduler
+from src.utils.ipc import SocketServer, request
 from src.trader.core.strategy_manager import StrategyManager
 from src.trader.core.trading_engine import TradingEngine
 from src.trader.switch_mgr import SwitchPosManager
@@ -67,19 +68,10 @@ class Trader:
 
         # Socket服务器（独立模式）
         self.socket_server: Optional[SocketServer] = None
+        self._server_task: Optional[asyncio.Task] = None
 
         # 运行状态
         self._running = False
-
-    def set_proxy_callback(self, callback: callable) -> None:
-        """
-        设置代理回调函数（用于内嵌模式）
-
-        Args:
-            callback: 回调函数，签名为 callback(msg_type: str, data: dict)
-        """
-        self._proxy_msg_callback = callback
-        logger.info(f"Trader [{self.account_id}] 设置代理回调函数")
 
     async def start(
         self,
@@ -103,15 +95,24 @@ class Trader:
         # 注册事件处理器
         self._register_event_handlers()
 
-        # 初始化交易引擎
-        self.trading_engine = TradingEngine(self.account_config)
+        # 启动Socket服务器
+        self.socket_server = SocketServer(self._socket_path, self.account_id)
+        self.socket_server.register_handlers_from_instance(self)
+        self._server_task = asyncio.create_task(self.socket_server.start())
+        await asyncio.sleep(0.2)
+        logger.info(f"Trader [{self.account_id}] SocketServer已启动，继续初始化...")
 
-        # 初始化换仓管理器、作业管理器、作业调度器
+        # 启动交易引擎
+        self.trading_engine = TradingEngine(self.account_config)
+        self.trading_engine.start()
+
+        # 启动换仓管理器、作业管理器
         self.switchPos_manager = SwitchPosManager(self.account_config, self.trading_engine)
+        self.switchPos_manager.start()
+        # 启动任务调度器及作业管理器
         self.job_manager = JobManager(
             self.account_config, self.trading_engine, self.switchPos_manager
         )
-        # 初始化任务调度器
         if self.account_config.scheduler:
             self.task_scheduler = TaskScheduler(self.account_config.scheduler, self.job_manager)
             self.task_scheduler.start()
@@ -119,37 +120,25 @@ class Trader:
         else:
             logger.info(f"Trader [{self.account_id}] 未配置任务调度器")
 
-        await self._run_standalone()
-
-        # 连接交易系统
-        if not self.trading_engine.connect():
-            logger.error(f"Trader [{self.account_id}] 连接交易系统失败")
-
-        logger.info(f"Trader [{self.account_id}] 交易引擎已启动")
-
-        # 初始化策略管理器
-        await self._init_strategy_manager()
+        # 启动策略管理器
+        if self.account_config.strategies:
+            self.strategy_manager = StrategyManager(
+                self.account_config.strategies, self.trading_engine
+            )
+            await self.strategy_manager.start()
+        else:
+            logger.info(f"Trader [{self.account_id}] 未配置策略")
 
         # 保持运行
-        logger.info(f"Trader [{self.account_id}] 启动完成，持续运行中...")
-        while self._running:
-            await asyncio.sleep(1)
+        logger.info("=" * 60)
+        logger.info(f"Trader [{self.account_id}] 启动成功，持续运行中...")
+        logger.info("=" * 60)
 
-    async def _init_strategy_manager(self) -> None:
-        """初始化策略管理器"""
-        self.strategy_manager = StrategyManager()
-        # 使用账户配置中的策略配置
-        strategies_config = self.account_config.strategies
-        if strategies_config and strategies_config.strategies:
-            # 直接使用配置中的策略数据，不从文件加载
-            self.strategy_manager.configs = strategies_config.strategies
-            # 加载并实例化策略
-            self.strategy_manager._load_strategies()
-            # 注册事件
-            self.strategy_manager._register_events()
-            # 启动所有策略
-            self.strategy_manager.start_all()
-        logger.info(f"Trader [{self.account_id}] 策略管理器已启动")
+        # 等待服务器任务（防止协程结束）
+        try:
+            await self._server_task
+        except asyncio.CancelledError:
+            logger.info(f"Trader [{self.account_id}] 服务器任务已取消")
 
     async def _init_database(self) -> None:
         """
@@ -157,7 +146,7 @@ class Trader:
         检查数据库文件是否存在，不存在则创建并初始化
         """
         from pathlib import Path
-        from src.db.database import init_database, get_database
+        from src.utils.database import init_database, get_database
         from src.models.po import SystemParamPo
         from src.utils.config_loader import RiskControlConfig
 
@@ -259,12 +248,29 @@ class Trader:
 
     async def _run_standalone(self) -> None:
         """Standalone模式：独立运行（用于测试）"""
-        logger.info(f"Trader [{self.account_id}] 以独立模式运行")
+        logger.info(f"Trader [{self.account_id}] 启动SocketServer服务。。。")
 
         # 启动socket，自动收集带 @request 装饰器的方法
         self.socket_server = SocketServer(self._socket_path, self.account_id)
         self.socket_server.register_handlers_from_instance(self)
-        await self.socket_server.start()
+
+        # 将服务器作为后台任务启动（方案1：后台任务）
+        self._server_task = asyncio.create_task(self.socket_server.start())
+
+        # 等待服务器就绪（短暂延迟或等待信号）
+        await asyncio.sleep(0.2)
+
+        # 继续执行后续初始化...
+        logger.info(f"Trader [{self.account_id}] SocketServer已启动，继续初始化...")
+
+        # 在这里启动交易引擎等其他组件
+        # await self.trading_engine.start()
+
+        # 等待服务器任务（防止协程结束）
+        try:
+            await self._server_task
+        except asyncio.CancelledError:
+            logger.info(f"Trader [{self.account_id}] 服务器任务已取消")
 
     async def _on_account_update(self, data):
         """账户更新事件处理器"""
@@ -354,22 +360,34 @@ class Trader:
 
     # ========== Socket请求处理方法 ==========
 
-    @request("connect")
+    @request("connect_gateway")
     async def _req_connect(self, data: dict) -> bool:
         """处理连接请求"""
+        if self.trading_engine is None:
+            logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
+            return None
+        self.trading_engine.connect()
         logger.info(f"Trader [{self.account_id}] 连接成功")
         return True
 
-    @request("disconnect")
+    @request("disconnect_gateway")
     async def _req_disconnect(self, data: dict) -> bool:
         """处理断开连接请求"""
+        if self.trading_engine is None:
+            logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
+            return None
+        self.trading_engine.disconnect()
         logger.info(f"Trader [{self.account_id}] 断开连接成功")
         return True
 
     @request("subscribe")
     async def _req_subscribe(self, data: dict) -> bool:
         """处理订阅请求"""
-        logger.info(f"Trader [{self.account_id}] 订阅成功")
+        if self.trading_engine is None:
+            logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
+            return None
+        self.trading_engine.subscribe_symbol(data["symbol"])
+        logger.info(f"Trader [{self.account_id}] 订阅{data['symbol']}成功")
         return True
 
     @request("unsubscribe")
@@ -528,7 +546,6 @@ class Trader:
         return [job.model_dump() for job in jobs.values()]
 
     # ========== 策略管理请求处理 ==========
-
     @request("list_strategies")
     async def _req_list_strategies(self, data: dict) -> list:
         """处理获取策略列表请求"""
@@ -541,7 +558,10 @@ class Trader:
             strategy_res = StrategyRes(
                 strategy_id=strategy.strategy_id,
                 active=strategy.active,
-                config=self._build_strategy_config(strategy),
+                enabled=strategy.enabled,
+                inited=strategy.inited,
+                config=strategy.config.model_dump(),
+                params=strategy.get_params(),
             )
             result.append(strategy_res.model_dump())
         return result
@@ -559,7 +579,8 @@ class Trader:
             result = StrategyRes(
                 strategy_id=strategy.strategy_id,
                 active=strategy.active,
-                config=self._build_strategy_config(strategy),
+                config=strategy.config,
+                params=strategy.get_params(),
             )
             return result.model_dump()
         return None
@@ -600,11 +621,12 @@ class Trader:
         self.strategy_manager.stop_all()
         return True
 
-    def _build_strategy_config(self, strategy) -> dict:
+    def _build_strategy_config(self, strategy:BaseStrategy) -> dict:
         """构建策略配置对象"""
         from src.manager.api.schemas import StrategyConfig
 
-        config = strategy.config.copy()
+        config = strategy.config
+        params = strategy.get_params()
         strategy_config = StrategyConfig(
             enabled=config.get("enabled", True),
             strategy_type=config.get("type", "bar"),
@@ -636,7 +658,7 @@ class Trader:
     @request("get_rotation_instructions")
     async def _req_get_rotation_instructions(self, data: dict) -> dict:
         """处理获取换仓指令列表请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
 
         db = get_database()
@@ -666,7 +688,7 @@ class Trader:
             rotation_status = {"working": False, "is_manual": False}
             if self.switchPos_manager:
                 rotation_status = {
-                    "working": self.switchPos_manager.is_working,
+                    "working": self.switchPos_manager.working,
                     "is_manual": self.switchPos_manager.is_manual,
                 }
 
@@ -713,7 +735,7 @@ class Trader:
     @request("get_rotation_instruction")
     async def _req_get_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理获取指定换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
 
         db = get_database()
@@ -769,7 +791,7 @@ class Trader:
     @request("create_rotation_instruction")
     async def _req_create_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理创建换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
         from datetime import datetime
 
@@ -831,7 +853,7 @@ class Trader:
     @request("update_rotation_instruction")
     async def _req_update_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理更新换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
         from datetime import datetime
 
@@ -883,7 +905,7 @@ class Trader:
     @request("delete_rotation_instruction")
     async def _req_delete_rotation_instruction(self, data: dict) -> bool:
         """处理删除换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
         from datetime import datetime
 
@@ -911,7 +933,7 @@ class Trader:
     @request("clear_rotation_instructions")
     async def _req_clear_rotation_instructions(self, data: dict) -> bool:
         """处理清除已完成换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
         from datetime import datetime
 
@@ -980,7 +1002,7 @@ class Trader:
     @request("batch_execute_instructions")
     async def _req_batch_execute_instructions(self, data: dict) -> dict:
         """处理批量执行换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
         from datetime import datetime
 
@@ -1031,7 +1053,7 @@ class Trader:
     @request("batch_delete_instructions")
     async def _req_batch_delete_instructions(self, data: dict) -> dict:
         """处理批量删除换仓指令请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
         from datetime import datetime
 
@@ -1054,7 +1076,7 @@ class Trader:
     @request("list_system_params")
     async def _req_list_system_params(self, data: dict) -> list:
         """处理获取系统参数列表请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import SystemParamPo
 
         db = get_database()
@@ -1085,7 +1107,7 @@ class Trader:
     @request("get_system_param")
     async def _req_get_system_param(self, data: dict) -> Optional[dict]:
         """处理获取单个系统参数请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import SystemParamPo
 
         db = get_database()
@@ -1112,7 +1134,7 @@ class Trader:
     @request("update_system_param")
     async def _req_update_system_param(self, data: dict) -> Optional[dict]:
         """处理更新系统参数请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import SystemParamPo
         from datetime import datetime
 
@@ -1150,7 +1172,7 @@ class Trader:
     @request("get_system_params_by_group")
     async def _req_get_system_params_by_group(self, data: dict) -> Optional[dict]:
         """处理根据分组获取系统参数请求"""
-        from src.db.database import get_database
+        from src.utils.database import get_database
         from src.models.po import SystemParamPo
 
         db = get_database()
@@ -1161,3 +1183,14 @@ class Trader:
 
             result = {param.param_key: param.param_value for param in params}
             return result
+
+    @request("pause_trading")
+    async def _req_pause_trading(self, data: dict) -> dict:
+        """处理暂停交易请求"""
+        self.trading_engine.paused = True
+        return True
+    @request("resume_trading")
+    async def _req_resume_trading(self, data: dict) -> dict:
+        """处理恢复交易请求"""
+        self.trading_engine.paused = False
+        return True

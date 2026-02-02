@@ -206,15 +206,8 @@ async def connect_account_gateway(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    engine = trading_manager.get_trading_engine(account_id)
-    if not engine:
-        return error_response(code=500, message="交易引擎未初始化")
 
-    if engine.gateway.connected:
-        return success_response(data={"connected": True}, message="已连接")
-
-    success = engine.connect()
-
+    success = await trader.connect()
     if success:
         return success_response(data={"connected": True}, message="连接成功")
     else:
@@ -233,16 +226,14 @@ async def disconnect_account_gateway(
     - **account_id**: 账户ID
     """
     trader = trading_manager.traders.get(account_id)
-
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    engine = trading_manager.get_trading_engine(account_id)
-    if not engine:
-        return error_response(code=500, message="交易引擎未初始化")
-
-    engine.disconnect()
-    return success_response(data={"connected": False}, message="已断开连接")
+    success = await trader.disconnect()
+    if success:
+        return success_response(data={"connected": False}, message="已断开连接")
+    else:
+        return error_response(code=500, message="断开连接失败")
 
 
 @router.post("/{account_id}/pause")
@@ -256,13 +247,15 @@ async def pause_account_trading(
     暂停自动交易功能，手动下单仍然可用
     - **account_id**: 账户ID
     """
-    engine = trading_manager.get_trading_engine(account_id)
+    trader = trading_manager.traders.get(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    if not engine:
-        return error_response(code=500, message="交易引擎未初始化")
-
-    engine.pause()
-    return success_response(data={"paused": True}, message="交易已暂停")
+    success = await trader.pause()
+    if success:
+        return success_response(data={"paused": True}, message="交易已暂停")
+    else:
+        return error_response(code=500, message="暂停交易失败")
 
 
 @router.post("/{account_id}/resume")
@@ -276,10 +269,12 @@ async def resume_account_trading(
     恢复自动交易功能
     - **account_id**: 账户ID
     """
-    engine = trading_manager.get_trading_engine(account_id)
+    trader = trading_manager.traders.get(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    if not engine:
-        return error_response(code=500, message="交易引擎未初始化")
-
-    engine.resume()
-    return success_response(data={"paused": False}, message="交易已恢复")
+    success = await trader.resume()
+    if success:
+        return success_response(data={"paused": False}, message="交易已恢复")
+    else:
+        return error_response(code=500, message="恢复交易失败")

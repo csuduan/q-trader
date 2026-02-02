@@ -133,11 +133,16 @@ class StrategyConfig(BaseModel):
         extra = "allow"  # 允许额外字段
 
 
-class StrategiesConfig(BaseModel):
+class StrategyConfig(BaseModel):
     """策略配置集合"""
-
-    strategies: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-
+    enabled: bool = False
+    type: str = "rsi_strategy"
+    symbol: str = ""
+    exchange: str = ""
+    volume: int = 1
+    bar: str = "M1"
+    params_file: Optional[str] = None
+    params: Dict[str, Any] = Field(default_factory=dict)
     class Config:
         extra = "allow"  # 允许额外字段
 
@@ -180,7 +185,7 @@ class AccountConfig(BaseModel):
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
     paths: Optional[PathsConfig] = None
     scheduler: Optional[SchedulerConfig] = None
-    strategies: Optional[StrategiesConfig] = None
+    strategies: Optional[Dict[str, StrategyConfig]] = None
 
     class Config:
         extra = "allow"  # 允许额外字段

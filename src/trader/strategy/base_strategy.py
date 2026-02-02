@@ -13,6 +13,7 @@ from src.models.object import (
     TradeData,
 )
 from src.utils.logger import get_logger
+from src.utils.config_loader import StrategyConfig
 
 if TYPE_CHECKING:
     from src.trader.core.strategy_manager import StrategyManager
@@ -23,22 +24,27 @@ logger = get_logger(__name__)
 class BaseStrategy:
     """策略基类"""
 
-    def __init__(self, strategy_id: str, config: dict):
+    def __init__(self, strategy_id: str,strategy_config:StrategyConfig):
         self.strategy_id = strategy_id
-        self.config = config
+        self.config: StrategyConfig = strategy_config
         self.active: bool = False
         self.inited: bool = False
+        self.enabled: bool = True
 
         # 策略管理器引用（代替直接的 trading_engine）
         self.strategy_manager: Optional["StrategyManager"] = None
 
     # ==================== 生命周期 ====================
 
-    def init(self) -> bool:
+    def init(self,) -> bool:
         """策略初始化"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
         return True
+
+    def get_params(self) -> dict:
+        """获取策略参数"""
+        return {}
 
     def start(self) -> bool:
         """启动策略"""
@@ -59,14 +65,6 @@ class BaseStrategy:
         logger.info(f"策略 [{self.strategy_id}] 重新加载参数...")
         return True
 
-    def reset_for_new_day(self) -> bool:
-        """
-        每日开盘重置策略状态
-
-        子类可以重写此方法实现具体的重置逻辑
-        """
-        logger.info(f"策略 [{self.strategy_id}] 每日重置")
-        return True
 
     # ==================== 事件回调 ====================
 

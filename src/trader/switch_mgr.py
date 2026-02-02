@@ -17,7 +17,7 @@ from sqlalchemy import True_
 from sqlalchemy.orm import Session as SQLASession
 
 from src.utils.config_loader import AppConfig
-from src.db.database import get_session
+from src.utils.database import get_session
 from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.core.trading_engine import TradingEngine
@@ -75,6 +75,11 @@ class SwitchPosManager:
         self.working = False
         self.running_instructions: Optional[List[RotationInstructionPo]] = None
         self.is_manual = False
+    
+    def start(self):
+        """启动换仓管理器"""
+        pass
+
 
     def import_csv(self, csv_text: str, filename: str, mode: str = "replace"):
         """

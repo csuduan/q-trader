@@ -59,6 +59,21 @@ class TradingEngine:
         # 加载风控数据
         self.reload_risk_control_config() # type: ignore[attr-defined]
 
+    def start(self):
+        """
+        启动交易引擎
+        """
+        if self.gateway is None:
+            logger.error("Gateway未初始化，无法启动交易引擎")
+            return
+
+        # 连接Gateway
+        if not self.gateway.connect():
+            logger.error("Gateway连接失败，无法启动交易引擎")
+            return
+
+        logger.info(f"交易引擎 [{self.account_id}] 已启动")
+
     @property
     def connected(self) -> bool:
         if self.gateway is None:
@@ -79,6 +94,7 @@ class TradingEngine:
         account.gateway_connected = self.gateway.connected
         account.user_id = self.config.gateway.broker.user_id or "--"
         account.risk_status = self.risk_control.get_status()
+        account.trade_paused = self.paused
         return account
 
     @property

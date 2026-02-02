@@ -131,14 +131,14 @@ class EventEngine:
                 loop = ctx.get_event_loop()
                 if loop and loop.is_running():
                     # 使用 run_coroutine_threadsafe 在线程中安全地调度协程
-                    asyncio.run_coroutine_threadsafe(handler(event.data), loop)
+                    asyncio.run_coroutine_threadsafe(handler(event), loop)
                 else:
                     logger.warning(f"[{self._name}] 事件循环未运行，无法处理异步处理器")
             except Exception as e:
                 logger.error(f"[{self._name}] 调度异步处理器失败: {e}")
         else:
             # 同步处理器：直接调用
-            handler(event.data)
+            handler(event)
 
     def start(self) -> None:
         """
@@ -179,7 +179,7 @@ class EventEngine:
 
         Args:
             event_type: 事件类型
-            handler: 处理器函数，接收事件数据作为参数
+            handler: 处理器函数，接收 Event 对象作为参数
         """
         if handler not in self._handlers[event_type]:
             self._handlers[event_type].append(handler)
@@ -207,7 +207,7 @@ class EventEngine:
         通用处理器会接收所有类型的事件。
 
         Args:
-            handler: 处理器函数，接收事件数据作为参数
+            handler: 处理器函数，接收 Event 对象作为参数
         """
         if handler not in self._general_handlers:
             self._general_handlers.append(handler)

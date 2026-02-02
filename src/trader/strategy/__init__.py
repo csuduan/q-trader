@@ -7,7 +7,7 @@ qtrader 策略模块
 from typing import TYPE_CHECKING
 
 from src.trader.strategy.base_strategy import BaseStrategy
-from src.trader.strategy.strategy_rsi import RsiStrategy, create_strategy
+from src.trader.strategy.strategy_rsi import RsiStrategy
 
 if TYPE_CHECKING:
     from src.trader.core.strategy_manager import StrategyManager, load_strategy_params

@@ -10,7 +10,7 @@ from typing import Optional
 import yaml
 from sqlalchemy.orm import Session
 
-from src.db.database import Database, get_database
+from src.utils.database import Database, get_database
 from src.models.po import JobPo, SystemParamPo
 from src.utils.config_loader import PathsConfig, get_config_loader
 from src.utils.logger import get_logger
@@ -44,7 +44,7 @@ def init_system(config_path: Optional[str] = None, db_path: Optional[str] = None
 
         logger.info(f"数据库路径: {final_db_path}")
 
-        from src.db.database import init_database
+        from src.utils.database import init_database
 
         db: Database = init_database(final_db_path, echo=False)
 

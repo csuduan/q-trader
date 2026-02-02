@@ -4,7 +4,7 @@ API数据模型定义
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List, Any
 
 from pydantic import BaseModel, Field
 
@@ -202,7 +202,19 @@ class StrategyRes(BaseModel):
 
     strategy_id: str
     active: bool
-    config: "StrategyConfig"
+    enabled: bool
+    inited: bool
+    config: dict
+    params: dict
+    # 运行时状态
+    position_side: int = 0
+    holding: bool = False
+    entry_price: float = 0.0
+    trade_count: int = 0
+    total_pnl: float = 0.0
+    # 时间戳
+    last_trade_date: Optional[str] = None
+    updated_at: datetime = Field(default_factory=datetime.now)
 
     model_config = {"populate_by_name": True}
 
@@ -219,22 +231,73 @@ class StrategyConfig(BaseModel):
     bar: str | None = None
     params_file: str | None = None
     take_profit_pct: float | None = None
+    stop_profit_pct: float | None = None  # 别名
     stop_loss_pct: float | None = None
     fee_rate: float | None = None
     trade_start_time: str | None = None
     trade_end_time: str | None = None
     force_exit_time: str | None = None
     one_trade_per_day: bool | None = None
-    # RSI策略参数
+    # RSI策略参数（兼容新旧命名）
     rsi_period: int | None = None
-    rsi_long_threshold: float | None = None
-    rsi_short_threshold: float | None = None
+    rsi_n: int | None = None  # 别名
+    long_threshold: float | None = None  # 新命名
+    short_threshold: float | None = None  # 新命名
+    rsi_long_threshold: float | None = None  # 旧命名
+    rsi_short_threshold: float | None = None  # 旧命名
     short_kline_period: int | None = None
     long_kline_period: int | None = None
     dir_threshold: float | None = None
     used_signal: bool | None = None
 
     model_config = {"populate_by_name": True}
+
+
+class StrategyUpdateReq(BaseModel):
+    """策略参数更新请求"""
+
+    params: dict = {}  # 要更新的参数字段
+    restart: bool = False  # 是否重启策略以应用变更
+
+
+class StrategyBatchOpReq(BaseModel):
+    """策略批量操作请求"""
+
+    strategy_ids: List[str]  # 要操作的策略ID列表
+    operation: str  # 操作类型: start, stop, restart
+
+
+class StrategyParamsRes(BaseModel):
+    """策略参数响应（用于前端显示）"""
+
+    strategy_id: str
+    # 参数文件（默认显示）
+    params_file: Optional[str] = None
+    # 详细参数（悬浮显示）
+    params: dict = {}
+    # 关键参数摘要（用于快速展示）
+    summary: Dict[str, Any] = {}
+
+    model_config = {"populate_by_name": True}
+
+
+class StrategyStatusRes(BaseModel):
+    """策略状态响应"""
+
+    strategy_id: str
+    active: bool
+    enabled: bool
+    inited: bool
+    # 持仓状态
+    holding: bool = False
+    position_side: int = 0
+    entry_price: float = 0.0
+    # 交易统计
+    trade_count: int = 0
+    total_pnl: float = 0.0
+    # 时间戳
+    last_trade_date: Optional[str] = None
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class TraderStatusRes(BaseModel):
