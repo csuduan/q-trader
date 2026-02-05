@@ -110,21 +110,21 @@ async def update_alert_wechat(
     trading_manager=Depends(get_trading_manager),
 ):
     """
-    更新微信告警配置（仅更新内存中的配置，不保存到文件）
+    更新微信告警配置（通过IPC发送给Trader进程）
 
     - **account_id**: 可选，指定账户ID（多账号模式）
     - **alert_wechat**: 是否启用微信告警
     """
-    # 更新内存中的账户配置
-    account_config = trading_manager.account_configs_map.get(account_id)
-    if not account_config:
-        return error_response(code=404, message=f"账户配置 [{account_id}] 不存在")
+    trader = trading_manager.get_trader(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    # 更新配置对象
-    account_config.alert_wechat = alert_wechat
-    logger.info(f"账户 [{account_id}] 微信告警配置已更新: {alert_wechat}")
-
-    return success_response(data={"alert_wechat": alert_wechat}, message="微信告警配置已更新")
+    # 通过IPC发送到Trader进程
+    success = await trader.update_alert_wechat(alert_wechat)
+    if success:
+        return success_response(data={"alert_wechat": alert_wechat}, message="微信告警配置已更新")
+    else:
+        return error_response(code=500, message="更新微信告警配置失败")
 
 
 @router.get("/alert-wechat")
@@ -133,15 +133,20 @@ async def get_alert_wechat(
     trading_manager=Depends(get_trading_manager),
 ):
     """
-    获取微信告警配置
+    获取微信告警配置（通过IPC从Trader进程获取）
 
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    account_config = trading_manager.account_configs_map.get(account_id)
-    if not account_config:
-        return error_response(code=404, message=f"账户配置 [{account_id}] 不存在")
+    trader = trading_manager.get_trader(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    return success_response(data={"alert_wechat": account_config.alert_wechat}, message="获取成功")
+    # 通过IPC从Trader进程获取
+    alert_wechat = await trader.get_alert_wechat()
+    if alert_wechat is not None:
+        return success_response(data={"alert_wechat": alert_wechat}, message="获取成功")
+    else:
+        return error_response(code=500, message="获取微信告警配置失败")
 
 
 @router.post("/connect")

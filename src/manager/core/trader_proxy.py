@@ -755,6 +755,51 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 恢复交易请求失败: {e}")
             return False
 
+    async def update_alert_wechat(self, alert_wechat: bool) -> bool:
+        """
+        更新微信告警配置
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            alert_wechat: 是否启用微信告警
+
+        Returns:
+            是否成功
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送更新请求")
+            return False
+
+        try:
+            response = await self.socket_client.request("update_alert_wechat", {"alert_wechat": alert_wechat}, timeout=10.0)
+            return response is not None
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 更新微信告警配置请求失败: {e}")
+            return False
+
+    async def get_alert_wechat(self) -> Optional[bool]:
+        """
+        获取微信告警配置
+
+        通过socket发送请求到远程Trader
+
+        Returns:
+            alert_wechat 值，失败返回 None
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送获取请求")
+            return None
+
+        try:
+            response = await self.socket_client.request("get_alert_wechat", {}, timeout=10.0)
+            if response and "alert_wechat" in response:
+                return response["alert_wechat"]
+            return None
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 获取微信告警配置请求失败: {e}")
+            return None
+
     @property
     def gateway(self) -> "_GatewayStatus":
         """网关状态（用于兼容路由代码）"""

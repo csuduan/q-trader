@@ -1244,3 +1244,16 @@ class Trader:
         """处理恢复交易请求"""
         self.trading_engine.paused = False
         return True
+
+    @request("update_alert_wechat")
+    async def _req_update_alert_wechat(self, data: dict) -> dict:
+        """处理更新微信告警配置请求"""
+        alert_wechat = data.get("alert_wechat", False)
+        self.account_config.alert_wechat = alert_wechat
+        logger.info(f"Trader [{self.account_id}] 微信告警配置已更新: {alert_wechat}")
+        return {"alert_wechat": alert_wechat}
+
+    @request("get_alert_wechat")
+    async def _req_get_alert_wechat(self, data: dict) -> dict:
+        """处理获取微信告警配置请求"""
+        return {"alert_wechat": self.account_config.alert_wechat}
