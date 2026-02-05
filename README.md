@@ -363,6 +363,9 @@ pytest tests/unit/ -v
 - **测试规范**: [TESTING.md](TESTING.md) - 测试规范和流程
 - **多账号架构**: [docs/MULTI_ACCOUNT_ARCHITECTURE.md](docs/MULTI_ACCOUNT_ARCHITECTURE.md)
 
+## 参考文档
+- **tqsdk**: https://doc.shinnytech.com/tqsdk/latest/usage/
+
 ## 许可证
 
 MIT License

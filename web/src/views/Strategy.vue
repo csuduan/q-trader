@@ -25,23 +25,12 @@
         </div>
       </template>
 
-      <el-table :data="strategies" stripe v-loading="loading" table-layout="fixed">
-        <el-table-column prop="strategy_id" label="策略ID" width="150" />
-        <!-- <el-table-column prop="config.strategy_type" label="策略类型" width="100">
+      <el-table :data="strategies" stripe v-loading="loading" table-layout="auto">
+        <el-table-column prop="strategy_id" label="策略ID" width="140" fixed />
+        <el-table-column prop="config.symbol" label="合约" width="120" />
+        <el-table-column prop="config.bar" label="时间类型" width="100">
           <template #default="{ row }">
-            <el-tag size="small">
-              {{ row.config.strategy_type === 'bar' ? 'K线策略' : row.config.strategy_type === 'tick' ? 'Tick策略' : '混合策略' }}
-            </el-tag>
-          </template>
-        </el-table-column> -->
-        <el-table-column prop="config.symbol" label="合约" width="120">
-          <template #default="{ row }">
-            {{ row.config.symbol || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="config.exchange" label="交易所" width="100">
-          <template #default="{ row }">
-            {{ row.config.exchange || '-' }}
+            <el-tag size="small" type="info">{{ row.config.bar || '-' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="运行状态" width="100">
@@ -51,30 +40,39 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="config.volume_per_trade" label="手数/次" width="90" />
-        <el-table-column prop="config.max_position" label="最大持仓" width="90" />
-        <el-table-column label="策略参数" min-width="200">
+        <el-table-column label="信号" width="100">
           <template #default="{ row }">
-            <el-descriptions :column="1" size="small" border>
-              <el-descriptions-item v-if="row.config.rsi_period !== undefined" label="RSI周期">
-                {{ row.config.rsi_period }}
-              </el-descriptions-item>
-              <el-descriptions-item v-if="row.config.rsi_long_threshold !== undefined" label="多头阈值">
-                {{ row.config.rsi_long_threshold }}
-              </el-descriptions-item>
-              <el-descriptions-item v-if="row.config.rsi_short_threshold !== undefined" label="空头阈值">
-                {{ row.config.rsi_short_threshold }}
-              </el-descriptions-item>
-              <el-descriptions-item v-if="row.config.take_profit_pct !== undefined" label="止盈%">
-                {{ (row.config.take_profit_pct * 100).toFixed(1) }}%
-              </el-descriptions-item>
-              <el-descriptions-item v-if="row.config.stop_loss_pct !== undefined" label="止损%">
-                {{ (row.config.stop_loss_pct * 100).toFixed(1) }}%
-              </el-descriptions-item>
-            </el-descriptions>
+            <el-tooltip v-if="row.signal && row.signal.side !== 0" placement="left" :show-after="200">
+              <template #content>
+                <div class="signal-detail">
+                  <div>方向: <span :class="row.signal.side > 0 ? 'text-long' : 'text-short'">{{ row.signal.side > 0 ? '多头' : '空头' }}</span></div>
+                  <div v-if="row.signal.entry_price">入场价: {{ row.signal.entry_price.toFixed(2) }}</div>
+                  <div v-if="row.signal.entry_time">入场时间: {{ formatDateTime(row.signal.entry_time) }}</div>
+                  <div v-if="row.signal.entry_volume">目标手数: {{ row.signal.entry_volume }}</div>
+                  <div v-if="row.signal.pos_volume">持仓手数: {{ row.signal.pos_volume }}</div>
+                  <div v-if="row.signal.pos_price">持仓均价: {{ row.signal.pos_price.toFixed(2) }}</div>
+                  <div v-if="row.signal.exit_time" class="exit-info">
+                    <div>退出价: {{ row.signal.exit_price?.toFixed(2) || '-' }}</div>
+                    <div>退出时间: {{ formatDateTime(row.signal.exit_time) }}</div>
+                    <div>退出原因: {{ getExitReasonText(row.signal.exit_reason) }}</div>
+                  </div>
+                </div>
+              </template>
+              <el-tag :type="row.signal.side > 0 ? 'danger' : 'primary'" size="small">
+                {{ row.signal.side > 0 ? '多' : '空' }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else type="info" size="small">无</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="交易状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getTradingStatusType(row.trading_status)" size="small">
+              {{ row.trading_status || '无' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="!row.active"
@@ -102,16 +100,68 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { strategyApi } from '@/api'
-import type { StrategyRes } from '@/types'
+
+interface StrategyRes {
+  strategy_id: string
+  active: boolean
+  enabled: boolean
+  inited: boolean
+  config: Record<string, any>
+  params: Record<string, any>
+  signal: SignalData
+  trading_status: string
+}
+
+interface SignalData {
+  side: number
+  entry_price: number
+  entry_time: string
+  entry_volume: number
+  exit_price: number
+  exit_time: string | null
+  exit_reason: string
+  pos_volume: number
+  pos_price: number | null
+}
 
 const store = useStore()
 const loading = ref(false)
 const strategies = ref<StrategyRes[]>([])
 const replayAllLoading = ref(false)
+
+function formatDateTime(dateStr: string | undefined): string {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function getExitReasonText(reason: string | undefined): string {
+  const reasonMap: Record<string, string> = {
+    'TP': '止盈',
+    'SL': '止损',
+    'FORCE': '强制平仓'
+  }
+  return reasonMap[reason || ''] || reason || '-'
+}
+
+function getTradingStatusType(status: string | undefined): string {
+  const typeMap: Record<string, string> = {
+    '无': 'info',
+    '开仓中': 'primary',
+    '平仓中': 'warning',
+    '持仓': 'success'
+  }
+  return typeMap[status || ''] || 'info'
+}
 
 async function loadStrategies() {
   loading.value = true
@@ -164,10 +214,6 @@ async function handleStopAll() {
   }
 }
 
-function formatNumber(num: number): string {
-  return num.toFixed(2)
-}
-
 async function handleReplayAll() {
   // 弹出确认对话框
   try {
@@ -218,5 +264,31 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.signal-detail {
+  font-size: 12px;
+  line-height: 1.8;
+  min-width: 150px;
+}
+
+.signal-detail > div {
+  display: block;
+}
+
+.signal-detail .exit-info {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color);
+}
+
+.text-long {
+  color: var(--el-color-danger);
+  font-weight: 500;
+}
+
+.text-short {
+  color: var(--el-color-primary);
+  font-weight: 500;
 }
 </style>

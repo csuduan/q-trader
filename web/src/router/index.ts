@@ -18,6 +18,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '账户' }
   },
   {
+    path: '/trading',
+    name: 'Trading',
+    component: () => import('@/views/Trading.vue'),
+    meta: { title: '交易' }
+  },
+  {
     path: '/strategy',
     name: 'Strategy',
     component: () => import('@/views/Strategy.vue'),

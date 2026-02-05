@@ -301,7 +301,6 @@ class StrategyManager:
         """处理报单指令更新事件"""
         strategy_id = self.cmd_strategy_map.get(cmd.cmd_id)
         if not strategy_id or strategy_id not in self.strategies:
-            logger.warning(f"未找到报单指令 {cmd.cmd_id} 对应的策略")
             return
 
         strategy = self.strategies[strategy_id]

@@ -46,6 +46,14 @@ class BaseStrategy:
     def get_params(self) -> dict:
         """获取策略参数"""
         return {}
+    
+    def get_signal(self) -> dict:
+        """获取当前信号"""
+        return None
+
+    def get_trading_status(self) -> str:
+        """是否正在交易中(开仓中，平仓中)"""
+        return ""
 
     def start(self) -> bool:
         """启动策略"""
@@ -69,6 +77,10 @@ class BaseStrategy:
     def on_bar(self, bar: BarData):
         """Bar行情回调"""
         pass
+    
+    def on_cmd_update(self,order_cmd:OrderCmd):
+        """订单状态回调"""
+        pass
 
     def on_order(self, order: OrderData):
         """订单状态回调"""
@@ -77,26 +89,15 @@ class BaseStrategy:
     def on_trade(self, trade: TradeData):
         """成交回调"""
         pass
+    
 
     # ==================== 交易接口 ====================
     def send_order_cmd(self,order_cmd:OrderCmd):
         self.order_cmds[order_cmd.cmd_id] = order_cmd
 
         """发送报单指令"""
-        if not self.strategy_manager:
-            logger.error("策略管理器未初始化，无法发送报单指令")
-            return
-        if not self.active:
-            logger.warning(f"策略 [{self.strategy_id}] 未启动，无法发送报单指令")
-            return
         self.strategy_manager.send_order_cmd(self.strategy_id,order_cmd)
     
     def cancel_order_cmd(self,order_cmd:OrderCmd):
         """取消报单指令"""
-        if not self.strategy_manager:
-            logger.error("策略管理器未初始化，无法取消报单指令")
-            return
-        if not self.active:
-            logger.warning(f"策略 [{self.strategy_id}] 未启动，无法取消报单指令")
-            return
         self.strategy_manager.cancel_order_cmd(self.strategy_id,order_cmd)

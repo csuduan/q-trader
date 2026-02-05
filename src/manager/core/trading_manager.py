@@ -563,6 +563,15 @@ class TradingManager:
             return result if result is not None else False
         return False
 
+    # ==================== 报单指令管理接口 ====================
+
+    async def get_order_cmds_status(self, account_id: str, status: str = None) -> Optional[list]:
+        """获取报单指令状态"""
+        trader = self.traders.get(account_id)
+        if trader:
+            return await trader.send_request("get_order_cmds_status", {"status": status})
+        return None
+
     async def batch_execute_instructions(self, account_id: str, ids: List[int]) -> Optional[dict]:
         """批量执行换仓指令"""
         trader = self.traders.get(account_id)

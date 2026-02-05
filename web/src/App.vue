@@ -22,6 +22,10 @@
           <el-icon><User /></el-icon>
           <span>账户</span>
         </el-menu-item>
+        <el-menu-item index="/trading">
+          <el-icon><Operation /></el-icon>
+          <span>交易</span>
+        </el-menu-item>
         <el-menu-item index="/strategy">
           <el-icon><TrendCharts /></el-icon>
           <span>策略</span>

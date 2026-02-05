@@ -1,5 +1,6 @@
 """
 TqSdk Gateway适配器
+参考文档：https://doc.shinnytech.com/tqsdk/latest/usage/
 """
 
 import threading
@@ -535,6 +536,7 @@ class TqGateway(BaseGateway):
             offset=Offset(order.get("offset", "OPEN")),
             volume=int(order.get("volume_orign", 0)),
             traded=int(order.get("volume_orign", 0)) - int(order.get("volume_left", 0)),
+            traded_price=float(order.get("price", 0)) or 0,
             price=order.get("limit_price"),
             price_type=OrderType.LIMIT if order.get("limit_price") else OrderType.MARKET,
             # status=self._convert_status(order.get("status")),
@@ -549,7 +551,8 @@ class TqGateway(BaseGateway):
             update_time=datetime.now(),
             trading_day=self.trading_day,
         )
-        if len(data.status_msg)>0 and not '全部成交' in data.status_msg:
+        error_msg = ["拒绝","取消","不足","暂停","禁止","错误","闭市","未连接","最小单位","失败","不"]
+        if any(keyword in data.status_msg for keyword in error_msg):
             data.status = "REJECTED"
         return data
 

@@ -140,8 +140,8 @@ class OrderCmd():
     def __init__(
         self,
         symbol: str,
-        direction: Direction,
-        offset: Offset,
+        direction: str,
+        offset: str,
         volume: int,
         price: Optional[float] = None,
         # 拆单参数
@@ -475,8 +475,8 @@ class OrderCmd():
             "status": self.status,
             "finish_reason": self.finish_reason if self.finish_reason else None,
             "symbol": self.symbol,
-            "direction": self.direction.value,
-            "offset": self.offset.value,
+            "direction": self.direction,
+            "offset": self.offset,
             "volume": self.volume,
             "filled_volume": self.filled_volume,
             "filled_price": round(self.filled_price, 2),

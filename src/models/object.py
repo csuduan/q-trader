@@ -206,6 +206,7 @@ class OrderData(BaseModel):
 
     volume: int = Field(..., description="委托数量")
     traded: int = Field(default=0, description="已成交数量")
+    traded_price: Optional[float] = Field(None, description="已成交价格")
 
     price: Optional[float] = Field(None, description="委托价格（None=市价单）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")

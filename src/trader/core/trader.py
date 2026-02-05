@@ -535,7 +535,40 @@ class Trader:
         if self.trading_engine is None:
             return []
         quotes = self.trading_engine.quotes
-        return [quote.model_dump() for quote in quotes.values()]  
+        return [quote.model_dump() for quote in quotes.values()]
+
+    @request("get_order_cmds_status")
+    async def _req_get_order_cmds_status(self, data: dict) -> Optional[list]:
+        """
+        处理获取报单指令状态请求
+
+        支持状态过滤:
+        - status="active" : 只返回未完成的活跃指令
+        - status="finished" : 只返回已完成的指令
+        - status=None: 返回所有指令
+
+        Returns:
+            执行器状态字典，失败返回None
+        """
+        if self.trading_engine is None:
+            logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
+            return None
+
+        if self.trading_engine._order_cmd_executor is None:
+            logger.warning(f"Trader [{self.account_id}] 报单指令执行器未初始化")
+            return None
+
+        try:
+            status_filter = data.get("status")
+            cmds =  self.trading_engine._order_cmd_executor.get_hist_cmds()
+            if status_filter == "active":
+                cmds = [cmd for cmd in cmds.values() if cmd.is_active]
+            elif status_filter == "finished":
+                cmds = [cmd for cmd in cmds.values() if cmd.is_finished]
+            return [cmd.to_dict() for cmd in cmds]
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 获取报单指令状态失败: {e}")
+            return None  
     
     @request("get_jobs")
     async def _req_get_jobs(self, data: dict) -> list:
@@ -562,6 +595,8 @@ class Trader:
                 inited=strategy.inited,
                 config=strategy.config.model_dump(),
                 params=strategy.get_params(),
+                signal=strategy.get_signal(),
+                trading_status=strategy.get_trading_status(),
             )
             result.append(strategy_res.model_dump())
         return result

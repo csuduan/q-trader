@@ -18,6 +18,7 @@ from typing import Optional
 import numpy as np
 from pydantic import BaseModel
 from pydantic_core.core_schema import NoneSchema
+from sqlalchemy.util.typing import is_a_type
 
 from src.models.object import BarData, OrderData,Offset
 from src.trader.strategy.base_strategy import BaseStrategy
@@ -64,8 +65,6 @@ class RsiParam(BaseModel):
 
 class Signal(BaseModel):
     """交易信号"""
-    enable: bool = True  # 是否有效
-    strategy_id: str = ""
     side: int = 0  # 信号方向: 1多头, -1空头,0无信号
     entry_price: float = 0.0  # 开仓价格
     entry_time: datetime = None  # 开仓时间
@@ -73,7 +72,6 @@ class Signal(BaseModel):
     exit_price: float = 0.0  # 平仓价格
     exit_time: datetime = None  # 平仓时间
     exit_reason: str = ""  # 平仓原因
-    rsi: float = 0.0  # 当前RSI值
 
     # 真实入场信息
     entry_order_id: Optional[str] = None  # 开仓订单信息
@@ -83,7 +81,7 @@ class Signal(BaseModel):
 
 
     def __str__(self) -> str:
-        return (f"Signal(strategy_id={self.strategy_id}, side={self.side}, "
+        return (f"Signal(side={self.side}, "
                 f"entry_price={self.entry_price}, entry_time={self.entry_time}, exit_price={self.exit_price}, "
                 f"exit_time={self.exit_time}, exit_reason={self.exit_reason})")
 
@@ -110,7 +108,7 @@ class RsiStrategy(BaseStrategy):
         self._last_long_bar_time: Optional[datetime] = None
         # 交易信号
         self.signal = None
-        self.order_cmds: dict[str, OrderCmd] = {}
+        self.pending_cmds: dict[str, OrderCmd] = {}
 
         # 构建参数字典，支持CSV和YAML两种格式的参数名
         # 注意：CSV中的列名可能是小写，这里需要兼容
@@ -151,6 +149,16 @@ class RsiStrategy(BaseStrategy):
     def get_params(self) -> dict:
         """获取策略参数"""
         return self.rsi_param.model_dump()
+    
+    def get_signal(self) -> dict:
+        """获取当前信号"""
+        return self.signal.model_dump() if self.signal else None
+    def get_trading_status(self) -> str:
+        """是否正在交易中(开仓中，平仓中)"""
+        for cmd in self.pending_cmds.values():
+            if cmd.is_active:
+                return "开仓中" if cmd.offset == Offset.OPEN else "平仓中"
+        return ""
     
 
     def _is_in_trade_window(self, bar_time: time) -> bool:
@@ -217,7 +225,7 @@ class RsiStrategy(BaseStrategy):
                     low_price=min(b['low'] for b in short_bars),
                     close_price=short_bars[-1]['close'],
                     volume=sum(b['volume'] for b in short_bars),
-                    update_time=bar.datetime,
+                    update_time=bar.datetime+timedelta(minutes=1),
                 )
 
         # 判断是否是长周期时间段的最后一根M1 bar
@@ -329,7 +337,6 @@ class RsiStrategy(BaseStrategy):
                 
             # 记录信号
             self.signal = Signal(
-               strategy_id=self.strategy_id,
                side=side,
                entry_price=short_bar.close_price,
                entry_time=short_bar.datetime,
@@ -340,25 +347,31 @@ class RsiStrategy(BaseStrategy):
         except Exception as e:
             logger.exception(f"策略 [{self.strategy_id}] on_bar 异常: {e}")
 
-    def on_order(self, order: OrderData):
-        """订单状态回调"""
+    def on_cmd_update(self,cmd:OrderCmd):
+        """更新持仓状态"""
         if not self.signal:
-            return      
-        if not order.status == "FINISHED":
-            return 
+            return   
 
-        if  self.signal.entry_order and order.order_id != self.signal.entry_order.order_id:
+        if cmd.is_active:
+            return
+
+        if cmd.cmd_id not in self.pending_cmds:
+            return
+        
+        # 报单已完成，可以从挂单中移除(防止重复统计成交数据)
+        self.pending_cmds.pop(cmd.cmd_id)
+
+        if  self.signal.entry_order_id and cmd.cmd_id == self.signal.entry_order_id:       
             # 开仓报单回报
-            self.signal.entry_order = None
-            total_cost = order.traded * order.price+self.signal.pos_volume*self.signal.pos_price
-            self.signal.pos_volume += order.traded
+            total_cost = cmd.filled_volume * cmd.filled_price+self.signal.pos_volume*self.signal.pos_price
+            self.signal.pos_volume += cmd.filled_volume
             self.signal.pos_price = total_cost/self.signal.pos_volume
             return 
-        if self.signal.exit_order and order.order_id == self.signal.exit_order.order_id:
+        if self.signal.exit_order_id and cmd.cmd_id == self.signal.exit_order_id:       
             # 平仓报单回报
-            self.signal.exit_order = None
-            self.signal.pos_volume -= order.traded
+            self.signal.pos_volume -= cmd.filled_volume
             return 
+        
 
     def _generate_signal(self, short_bar: BarData) -> int:
         """
@@ -450,17 +463,19 @@ class RsiStrategy(BaseStrategy):
         if signal.exit_time:
             # 平仓处理
             if signal.entry_order_id:
-                entry_cmd = self.order_cmds[signal.entry_order_id]
-                if not entry_cmd.is_finished:
+                entry_cmd = self.pending_cmds[signal.entry_order_id]
+                if entry_cmd and entry_cmd.is_active:
+                    # 当前开仓报单未完成，先撤单，等待下一次执行平仓
                     self.cancel_order_cmd(entry_cmd)
+                    return
                 
             if not signal.exit_order_id:
                 exit_cmd = OrderCmd(
                     symbol=f"{self.rsi_param.exchange}.{self.rsi_param.symbol}",
                     offset=Offset.CLOSE,
                     direction="SELL" if signal.side == 1 else "BUY",
-                    volume=self.rsi_param.volume_per_trade,
-                    price=bar.close_price,
+                    volume=signal.pos_volume,
+                    price=0,
                 )
                 signal.exit_order_id = exit_cmd.cmd_id
                 self.send_order_cmd(exit_cmd)
@@ -472,7 +487,7 @@ class RsiStrategy(BaseStrategy):
                     offset=Offset.OPEN,
                     direction="BUY" if signal.side == 1 else "SELL",
                     volume=self.rsi_param.volume_per_trade,
-                    price=bar.close_price,
+                    price=0,
                 )
                 signal.entry_order_id = entry_cmd.cmd_id
                 self.send_order_cmd(entry_cmd)
