@@ -150,20 +150,6 @@ class StrategyConfig(BaseModel):
 # ==================== 账户配置类 ====================
 
 
-class AccountBasicConfig(BaseModel):
-    """账户基础配置"""
-
-    trader_mode: str = "standalone"
-    account_type: str = "kq"
-    gateway_type: str = "TQSDK"
-    enabled: bool = True
-    account_id: Optional[str] = None
-
-    # 天勤账户配置
-    tianqin: Optional[TianqinConfig] = None
-    # CTP经纪商配置
-    broker: Optional[BrokerConfig] = None
-
 
 class GatewayConfig(BaseModel):
     """网关配置"""
@@ -182,6 +168,8 @@ class AccountConfig(BaseModel):
     account_type: str | None = "kq"
     enabled: bool | None = True
     auto_start: bool | None = False
+    alert_wechat: bool = False
+
     gateway: Optional[GatewayConfig] = None
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
     paths: Optional[PathsConfig] = None

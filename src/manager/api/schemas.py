@@ -201,19 +201,15 @@ class StrategyRes(BaseModel):
     """策略信息响应"""
 
     strategy_id: str
-    active: bool
-    enabled: bool
-    inited: bool
-    config: dict
-    params: dict
+    enabled: bool = False
+    inited: bool = False
+    config: dict | None = None
+    params: dict | None = None
     # 信号信息（从策略的get_signal()获取）
     signal: dict | None = None
     trading_status: str | None = None
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)
-
-    model_config = {"populate_by_name": True}
-
 
 class StrategyConfig(BaseModel):
     """策略配置"""

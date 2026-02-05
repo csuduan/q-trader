@@ -169,7 +169,7 @@ class OrderCmd():
         self.total_timeout = total_timeout #总超时时间
         self.max_retries = max_retries #超时重试次数
         self.order_timeout = order_timeout #单次报单超时
-        self.source = source  # 来源标识，格式："策略:{strategy_id}" 或 "换仓:{strategy_id}"
+        self.source = source  # 来源标识，格式："策略-{strategy_id}" 或 "换仓-{strategy_id}"
 
         # 状态
         self.status = OrderCmdStatus.PENDING

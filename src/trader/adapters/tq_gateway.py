@@ -622,6 +622,7 @@ class TqGateway(BaseGateway):
             low_price=float(data["low"]),
             close_price=float(data["close"]),
             volume=float(data["volume"]),
+            update_time=datetime.now(),
         )
 
     # ==================== 辅助方法 ====================

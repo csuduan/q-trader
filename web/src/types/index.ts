@@ -380,7 +380,14 @@ export interface StrategyConfig {
 export interface StrategyRes {
   strategy_id: string
   active: boolean
+  enabled: boolean
+  inited: boolean
   config: StrategyConfig
+  params?: StrategyParams
+  signal?: StrategySignalData
+  trading_status?: string
+  opening_paused?: boolean
+  closing_paused?: boolean
 }
 
 /** 兼容旧名称 */
@@ -427,6 +434,74 @@ export interface OrderCmd {
   offset?: 'OPEN' | 'CLOSE' | 'CLOSETODAY' | null
   limit_price?: number | null
   source?: string | null
+  started_at?: string | null
+  created_at: string
+  updated_at: string
+  filled_price?: number
+  remaining_volume?: number
+  is_active?: boolean
+  finish_reason?: string | null
+}
+
+/** 报单指令响应（用于前端显示） */
+export type OrderCmdRes = OrderCmd
+
+/** 策略操作状态 */
+export interface StrategyOperationState {
+  enabled: boolean
+  active: boolean
+  opening_paused: boolean
+  closing_paused: boolean
+}
+
+/** 策略报单指令过滤器 */
+export interface StrategyOrderCmdFilter {
+  status?: 'active' | 'finished' | 'all'
+}
+
+/** 策略参数 */
+export interface StrategyParams {
+  symbol: string
+  bar?: string
+  volume_per_trade: number
+  slippage?: number
+  max_position: number
+  take_profit_pct: number
+  stop_loss_pct: number
+  external_signal?: boolean
+  overnight?: boolean
+  force_exit_time?: string
+  // RSI 策略扩展参数
+  rsi_n?: number
+  rsi_period?: number
+  short_k?: number
+  short_kline_period?: number
+  long_k?: number
+  long_kline_period?: number
+  long_threshold?: number
+  rsi_long_threshold?: number
+  short_threshold?: number
+  rsi_short_threshold?: number
+  dir_thr?: number
+  use_signal?: boolean
+  one_trade_per_day?: boolean
+  fee_rate?: number
+}
+
+/** 策略信号数据 */
+export interface StrategySignalData {
+  side: number // 1多头, -1空头, 0无信号
+  entry_price: number
+  entry_time: string | null
+  entry_volume: number
+  exit_price: number
+  exit_time: string | null
+  exit_reason: string
+  entry_order_id: string | null
+  exit_order_id: string | null
+  pos_volume: number
+  pos_price: number | null
+}
   started_at?: string | null
   created_at: string
   updated_at: string

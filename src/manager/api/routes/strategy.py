@@ -260,7 +260,7 @@ async def update_strategy(
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
-    更新策略参数
+    更新策略参数或信号
 
     Args:
         strategy_id: 策略ID
@@ -275,8 +275,18 @@ async def update_strategy(
         if not trader:
             _handle_trader_not_found(account_id)
 
-        # TODO: 实现策略参数更新逻辑
-        # 需要Trader端支持更新策略参数
+        # 更新策略参数
+        params = request.params
+        if params:
+            result = await trader.update_strategy_params(strategy_id, params)
+            if not result.get("success"):
+                return error_response(message=result.get("message", "更新参数失败"))
+
+        # 如果需要重启策略
+        if request.restart:
+            await trading_manager.stop_strategy(account_id, strategy_id)
+            await asyncio.sleep(0.5)
+            await trading_manager.start_strategy(account_id, strategy_id)
 
         return success_response(message=f"策略 {strategy_id} 参数更新成功")
     except HTTPException:
@@ -284,6 +294,41 @@ async def update_strategy(
     except Exception as e:
         logger.error(f"更新策略参数失败: {e}")
         return error_response(message=f"更新策略参数失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/update-signal")
+async def update_strategy_signal(
+    strategy_id: str,
+    signal: dict = Body(..., description="信号数据"),
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    更新策略信号
+
+    Args:
+        strategy_id: 策略ID
+        signal: 信号数据
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.update_strategy_signal(strategy_id, signal)
+        if not result.get("success"):
+            return error_response(message=result.get("message", "更新信号失败"))
+
+        return success_response(message=f"策略 {strategy_id} 信号更新成功")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新策略信号失败: {e}")
+        return error_response(message=f"更新策略信号失败: {str(e)}")
 
 
 @router.get("/{strategy_id}/status")
@@ -420,3 +465,158 @@ async def replay_all_strategies(
     except Exception as e:
         logger.error(f"回播策略失败: {e}")
         return error_response(message=f"回播策略失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/pause-opening")
+async def pause_strategy_opening(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """暂停策略开仓"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.pause_strategy_opening(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 暂停开仓成功")
+        else:
+            return error_response(message=result.get("message", "暂停开仓失败"))
+    except Exception as e:
+        logger.error(f"暂停策略开仓失败: {e}")
+        return error_response(message=f"暂停开仓失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/resume-opening")
+async def resume_strategy_opening(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """恢复策略开仓"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.resume_strategy_opening(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 恢复开仓成功")
+        else:
+            return error_response(message=result.get("message", "恢复开仓失败"))
+    except Exception as e:
+        logger.error(f"恢复策略开仓失败: {e}")
+        return error_response(message=f"恢复开仓失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/pause-closing")
+async def pause_strategy_closing(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """暂停策略平仓"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.pause_strategy_closing(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 暂停平仓成功")
+        else:
+            return error_response(message=result.get("message", "暂停平仓失败"))
+    except Exception as e:
+        logger.error(f"暂停策略平仓失败: {e}")
+        return error_response(message=f"暂停平仓失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/resume-closing")
+async def resume_strategy_closing(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """恢复策略平仓"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.resume_strategy_closing(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 恢复平仓成功")
+        else:
+            return error_response(message=result.get("message", "恢复平仓失败"))
+    except Exception as e:
+        logger.error(f"恢复策略平仓失败: {e}")
+        return error_response(message=f"恢复平仓失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/enable")
+async def enable_strategy(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """启用策略"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.enable_strategy(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 启用成功")
+        else:
+            return error_response(message=result.get("message", "启用策略失败"))
+    except Exception as e:
+        logger.error(f"启用策略失败: {e}")
+        return error_response(message=f"启用策略失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/disable")
+async def disable_strategy(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """禁用策略"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.disable_strategy(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 禁用成功")
+        else:
+            return error_response(message=result.get("message", "禁用策略失败"))
+    except Exception as e:
+        logger.error(f"禁用策略失败: {e}")
+        return error_response(message=f"禁用策略失败: {str(e)}")
+
+
+@router.get("/{strategy_id}/order-cmds")
+async def get_strategy_order_cmds(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    status: Optional[str] = Query(None, description="状态过滤: active/finished"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """获取策略的报单指令历史"""
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.get_strategy_order_cmds(strategy_id, status)
+        if result is not None:
+            return success_response(data=result)
+        else:
+            return error_response(message="获取报单指令失败")
+    except Exception as e:
+        logger.error(f"获取策略报单指令失败: {e}")
+        return error_response(message=f"获取报单指令失败: {str(e)}")

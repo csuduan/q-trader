@@ -590,7 +590,6 @@ class Trader:
         for strategy in self.strategy_manager.strategies.values():
             strategy_res = StrategyRes(
                 strategy_id=strategy.strategy_id,
-                active=strategy.active,
                 enabled=strategy.enabled,
                 inited=strategy.inited,
                 config=strategy.config.model_dump(),
@@ -613,8 +612,9 @@ class Trader:
             strategy = self.strategy_manager.strategies[strategy_id]
             result = StrategyRes(
                 strategy_id=strategy.strategy_id,
-                active=strategy.active,
-                config=strategy.config,
+                enabled=strategy.enabled,
+                inited=strategy.inited,
+                config=strategy.config.model_dump(),
                 params=strategy.get_params(),
             )
             return result.model_dump()
@@ -671,6 +671,218 @@ class Trader:
         except Exception as e:
             logger.exception(f"回播策略失败: {e}")
             return {"success": False, "message": f"回播策略失败: {str(e)}"}
+
+    @request("update_strategy_params")
+    async def _req_update_strategy_params(self, data: dict) -> dict:
+        """处理更新策略参数请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            params = data.get("params", {})
+            strategy.update_params(params)
+            logger.info(f"策略 [{strategy_id}] 参数已更新: {params}")
+            return {"success": True, "message": "参数更新成功"}
+        except Exception as e:
+            logger.exception(f"更新策略参数失败: {e}")
+            return {"success": False, "message": f"更新失败: {str(e)}"}
+
+    @request("update_strategy_signal")
+    async def _req_update_strategy_signal(self, data: dict) -> dict:
+        """处理更新策略信号请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            signal = data.get("signal", {})
+            strategy.update_signal(signal)
+            logger.info(f"策略 [{strategy_id}] 信号已更新: {signal}")
+            return {"success": True, "message": "信号更新成功"}
+        except Exception as e:
+            logger.exception(f"更新策略信号失败: {e}")
+            return {"success": False, "message": f"更新失败: {str(e)}"}
+
+    @request("pause_strategy_opening")
+    async def _req_pause_strategy_opening(self, data: dict) -> dict:
+        """处理暂停策略开仓请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.pause_opening()
+            return {"success": True, "message": "暂停开仓成功"}
+        except Exception as e:
+            logger.exception(f"暂停策略开仓失败: {e}")
+            return {"success": False, "message": f"操作失败: {str(e)}"}
+
+    @request("resume_strategy_opening")
+    async def _req_resume_strategy_opening(self, data: dict) -> dict:
+        """处理恢复策略开仓请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.resume_opening()
+            return {"success": True, "message": "恢复开仓成功"}
+        except Exception as e:
+            logger.exception(f"恢复策略开仓失败: {e}")
+            return {"success": False, "message": f"操作失败: {str(e)}"}
+
+    @request("pause_strategy_closing")
+    async def _req_pause_strategy_closing(self, data: dict) -> dict:
+        """处理暂停策略平仓请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.pause_closing()
+            return {"success": True, "message": "暂停平仓成功"}
+        except Exception as e:
+            logger.exception(f"暂停策略平仓失败: {e}")
+            return {"success": False, "message": f"操作失败: {str(e)}"}
+
+    @request("resume_strategy_closing")
+    async def _req_resume_strategy_closing(self, data: dict) -> dict:
+        """处理恢复策略平仓请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.resume_closing()
+            return {"success": True, "message": "恢复平仓成功"}
+        except Exception as e:
+            logger.exception(f"恢复策略平仓失败: {e}")
+            return {"success": False, "message": f"操作失败: {str(e)}"}
+
+    @request("enable_strategy")
+    async def _req_enable_strategy(self, data: dict) -> dict:
+        """处理启用策略请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.enable()
+            return {"success": True, "message": "启用策略成功"}
+        except Exception as e:
+            logger.exception(f"启用策略失败: {e}")
+            return {"success": False, "message": f"操作失败: {str(e)}"}
+
+    @request("disable_strategy")
+    async def _req_disable_strategy(self, data: dict) -> dict:
+        """处理禁用策略请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.disable()
+            return {"success": True, "message": "禁用策略成功"}
+        except Exception as e:
+            logger.exception(f"禁用策略失败: {e}")
+            return {"success": False, "message": f"操作失败: {str(e)}"}
+
+    @request("get_strategy_order_cmds")
+    async def _req_get_strategy_order_cmds(self, data: dict) -> list:
+        """处理获取策略报单指令历史请求"""
+        if self.trading_engine is None:
+            logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
+            return []
+
+        if self.trading_engine._order_cmd_executor is None:
+            logger.warning(f"Trader [{self.account_id}] 报单指令执行器未初始化")
+            return []
+
+        try:
+            strategy_id = data.get("strategy_id")
+            status_filter = data.get("status")
+
+            if not strategy_id:
+                return []
+
+            cmds = self.trading_engine._order_cmd_executor.get_hist_cmds()
+
+            # 按策略ID过滤
+            prefix = f"策略-{strategy_id}"
+            filtered_cmds = []
+            for cmd in cmds.values():
+                if cmd.source and cmd.source.startswith(prefix):
+                    # 按状态过滤
+                    if status_filter == "active":
+                        if cmd.is_active:
+                            filtered_cmds.append(cmd)
+                    elif status_filter == "finished":
+                        if cmd.is_finished:
+                            filtered_cmds.append(cmd)
+                    else:
+                        filtered_cmds.append(cmd)
+
+            return [cmd.to_dict() for cmd in filtered_cmds]
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 获取策略报单指令失败: {e}")
+            return []
 
     def _build_strategy_config(self, strategy:BaseStrategy) -> dict:
         """构建策略配置对象"""

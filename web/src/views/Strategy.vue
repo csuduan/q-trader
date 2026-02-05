@@ -5,14 +5,6 @@
         <div class="card-header">
           <span>策略管理</span>
           <el-space>
-            <el-button type="success" @click="handleStartAll" :loading="loading">
-              <el-icon><VideoPlay /></el-icon>
-              启动
-            </el-button>
-            <el-button type="warning" @click="handleStopAll" :loading="loading">
-              <el-icon><VideoPause /></el-icon>
-              停止
-            </el-button>
             <el-button type="primary" @click="handleReplayAll" :loading="replayAllLoading">
               <el-icon><VideoPlay /></el-icon>
               回播
@@ -26,18 +18,20 @@
       </template>
 
       <el-table :data="strategies" stripe v-loading="loading" table-layout="auto">
-        <el-table-column prop="strategy_id" label="策略ID" width="140" fixed />
+        <el-table-column prop="strategy_id" label="策略ID" width="180" fixed />
         <el-table-column prop="config.symbol" label="合约" width="120" />
         <el-table-column prop="config.bar" label="时间类型" width="100">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ row.config.bar || '-' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="运行状态" width="100">
+        <el-table-column label="启用状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.active ? 'success' : 'info'" size="small">
-              {{ row.active ? '运行中' : '已停止' }}
-            </el-tag>
+            <el-switch
+              v-model="row.enabled"
+              @change="handleToggleEnabled(row.strategy_id, row.enabled)"
+              :loading="row.toggleLoading"
+            />
           </template>
         </el-table-column>
         <el-table-column label="信号" width="100">
@@ -72,23 +66,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="!row.active"
-              type="success"
+              type="primary"
               size="small"
-              @click="handleStartStrategy(row.strategy_id)"
+              @click="navigateToDetails(row.strategy_id)"
             >
-              启动
-            </el-button>
-            <el-button
-              v-else
-              type="warning"
-              size="small"
-              @click="handleStopStrategy(row.strategy_id)"
-            >
-              停止
+              详情
             </el-button>
           </template>
         </el-table-column>
@@ -101,6 +86,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { strategyApi } from '@/api'
@@ -114,6 +100,7 @@ interface StrategyRes {
   params: Record<string, any>
   signal: SignalData
   trading_status: string
+  toggleLoading?: boolean
 }
 
 interface SignalData {
@@ -128,10 +115,15 @@ interface SignalData {
   pos_price: number | null
 }
 
+const router = useRouter()
 const store = useStore()
 const loading = ref(false)
 const strategies = ref<StrategyRes[]>([])
 const replayAllLoading = ref(false)
+
+function navigateToDetails(strategyId: string) {
+  router.push(`/strategy/${strategyId}`)
+}
 
 function formatDateTime(dateStr: string | undefined): string {
   if (!dateStr) return '-'
@@ -174,48 +166,29 @@ async function loadStrategies() {
   }
 }
 
-async function handleStartStrategy(strategyId: string) {
-  try {
-    await strategyApi.startStrategy(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success(`策略 ${strategyId} 已启动`)
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`启动策略失败: ${error.message}`)
+async function handleToggleEnabled(strategyId: string, enabled: boolean) {
+  const strategy = strategies.value.find(s => s.strategy_id === strategyId)
+  if (strategy) {
+    strategy.toggleLoading = true
   }
-}
-
-async function handleStopStrategy(strategyId: string) {
   try {
-    await strategyApi.stopStrategy(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success(`策略 ${strategyId} 已停止`)
+    if (enabled) {
+      await strategyApi.enableStrategy(strategyId, store.selectedAccountId || undefined)
+      ElMessage.success('策略已启用')
+    } else {
+      await strategyApi.disableStrategy(strategyId, store.selectedAccountId || undefined)
+      ElMessage.success('策略已禁用')
+    }
     await loadStrategies()
   } catch (error: any) {
-    ElMessage.error(`停止策略失败: ${error.message}`)
-  }
-}
-
-async function handleStartAll() {
-  try {
-    await strategyApi.startAllStrategies(store.selectedAccountId || undefined)
-    ElMessage.success('所有策略已启动')
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`启动策略失败: ${error.message}`)
-  }
-}
-
-async function handleStopAll() {
-  try {
-    await strategyApi.stopAllStrategies(store.selectedAccountId || undefined)
-    ElMessage.success('所有策略已停止')
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`停止策略失败: ${error.message}`)
+    ElMessage.error(`操作失败: ${error.message}`)
+    if (strategy) {
+      strategy.toggleLoading = false
+    }
   }
 }
 
 async function handleReplayAll() {
-  // 弹出确认对话框
   try {
     await ElMessageBox.confirm(
       '当前只支持bar回播，回播会重置策略，并从当前交易日的初始bar开始推送。是否继续？',
@@ -227,7 +200,6 @@ async function handleReplayAll() {
       }
     )
   } catch {
-    // 用户取消
     return
   }
 
@@ -290,5 +262,11 @@ onMounted(async () => {
 .text-short {
   color: var(--el-color-primary);
   font-weight: 500;
+}
+
+.unit-label {
+  margin-left: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>

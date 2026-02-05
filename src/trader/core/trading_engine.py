@@ -15,12 +15,13 @@ import pandas as pd
 
 from src.app_context import get_app_context
 from src.utils.config_loader import AccountConfig, AppConfig
-from src.models.object import AccountData, CancelRequest, Direction, Offset, OrderRequest, TradeData
+from src.models.object import AccountData, CancelRequest, Direction, Offset, OrderRequest, TradeData,OrderData
 from src.trader.core.risk_control import RiskControl
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
 from src.trader.order_cmd_executor import OrderCmdExecutor
 from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
+from src.utils.wecomm import send_wechat
 
 logger = get_logger(__name__)
 ctx = get_app_context()
@@ -40,7 +41,7 @@ class TradingEngine:
             config: 配置对象（AppConfig 或 AccountConfig）
             event_engine: 事件引擎实例（可选，如果不提供则创建新的）
         """
-        self.config = config
+        self.config:AccountConfig = config
         self.account_id = config.account_id  # type: ignore[attr-defined]
         logger.info(
             f"TradingEngine __init__, account_id: {self.account_id}, config_id: {id(config)}"
@@ -449,9 +450,12 @@ class TradingEngine:
         """Gateway bar回调 → EventEngine"""
         self.event_engine.put(EventTypes.KLINE_UPDATE, bar)
 
-    def _on_order(self, order):
+    def _on_order(self, order:OrderData):
         """Gateway order回调 → EventEngine"""
         self.event_engine.put(EventTypes.ORDER_UPDATE, order)
+        if order.status == "REJECTED" and self.config.alert_wechat:
+            send_wechat(f"账户[{self.account_id}]告警：{order.status_msg}")
+            
 
     def _on_trade(self, trade):
         """Gateway trade回调 → EventEngine"""
@@ -494,6 +498,9 @@ class TradingEngine:
         # 注册到执行器（注册即启动）
         if self._order_cmd_executor:
             self._order_cmd_executor.register(cmd)
+        
+        if "策略-" in cmd.source and self.config.alert_wechat:
+            send_wechat(f"账户[{self.account_id}提醒]：创建新的报单指令{cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手")
 
         logger.info(f"创建报单指令: {cmd.cmd_id} {cmd.symbol} {cmd.direction} {cmd.volume}手")
         return cmd.cmd_id

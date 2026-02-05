@@ -2,7 +2,7 @@
  * 策略相关 API
  */
 import api from './request'
-import type { StrategyRes } from '@/types'
+import type { StrategyRes, StrategyParams, StrategySignalData, OrderCmdRes, StrategyOrderCmdFilter } from '@/types'
 
 export const strategyApi = {
   /**
@@ -57,5 +57,80 @@ export const strategyApi = {
   replayAllStrategies: async (accountId?: string): Promise<{ replayed_count: number }> => {
     const config = accountId ? { params: { account_id: accountId } } : undefined
     return api.post<{ replayed_count: number }>('/strategies/replay-all', null, config)
+  },
+
+  /**
+   * 更新策略参数
+   */
+  updateStrategy: async (strategyId: string, params: Partial<StrategyParams>, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.patch(`/strategies/${strategyId}`, { params, restart: false }, config)
+  },
+
+  /**
+   * 更新策略信号
+   */
+  updateStrategySignal: async (strategyId: string, signal: Partial<StrategySignalData>, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/update-signal`, signal, config)
+  },
+
+  /**
+   * 暂停策略开仓
+   */
+  pauseStrategyOpening: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/pause-opening`, null, config)
+  },
+
+  /**
+   * 恢复策略开仓
+   */
+  resumeStrategyOpening: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/resume-opening`, null, config)
+  },
+
+  /**
+   * 暂停策略平仓
+   */
+  pauseStrategyClosing: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/pause-closing`, null, config)
+  },
+
+  /**
+   * 恢复策略平仓
+   */
+  resumeStrategyClosing: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/resume-closing`, null, config)
+  },
+
+  /**
+   * 启用策略
+   */
+  enableStrategy: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/enable`, null, config)
+  },
+
+  /**
+   * 禁用策略
+   */
+  disableStrategy: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/disable`, null, config)
+  },
+
+  /**
+   * 获取策略的报单指令历史
+   */
+  getStrategyOrderCmds: async (strategyId: string, filter?: StrategyOrderCmdFilter, accountId?: string): Promise<OrderCmdRes[]> => {
+    const params: Record<string, string> = accountId ? { account_id: accountId } : {}
+    if (filter?.status && filter.status !== 'all') {
+      params.status = filter.status
+    }
+    return api.get<OrderCmdRes[]>(`/strategies/${strategyId}/order-cmds`, { params })
   }
 }

@@ -221,7 +221,7 @@ class StrategyManager:
         if method == "on_bar" and hasattr(data, "symbol"):
             bar:BarData = data
             for name, strategy in self.strategies.items():
-                if strategy.active and bar.id in strategy.bar_subscriptions:
+                if strategy.enabled and bar.id in strategy.bar_subscriptions:
                     try:
                         strategy.on_bar(bar)
                     except Exception as e:
@@ -230,7 +230,7 @@ class StrategyManager:
         if method == "on_tick" and hasattr(data, "symbol"):
             tick:TickData = data
             for name, strategy in self.strategies.items():
-                if strategy.active :
+                if strategy.enabled :
                     try:
                         strategy.on_tick(tick)
                     except Exception as e:
@@ -279,7 +279,7 @@ class StrategyManager:
             return
 
         strategy = self.strategies[strategy_id]
-        if strategy.active:
+        if strategy.enabled:
             try:
                 getattr(strategy, method)(data)
             except Exception as e:
@@ -304,7 +304,7 @@ class StrategyManager:
             return
 
         strategy = self.strategies[strategy_id]
-        if strategy.active:
+        if strategy.enabled:
             try:
                 strategy.on_cmd_update(cmd)
                 logger.debug(
@@ -372,7 +372,6 @@ class StrategyManager:
         return [
             {
                 "strategy_id": s.strategy_id,
-                "active": s.active,
                 "enabled": s.enabled,
                 "inited": s.inited,
                 "config": s.config.model_dump(),
@@ -440,8 +439,6 @@ class StrategyManager:
             order_cmd: 订单指令对象
         """
         try:
-            # 设置来源标识
-            order_cmd.source = f"策略:{strategy_id}"
             self.cmd_strategy_map[order_cmd.cmd_id] = strategy_id
             self.trading_engine.insert_order_cmd(order_cmd)
             logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")
@@ -601,7 +598,7 @@ class StrategyManager:
             bar: 完成的BarData
         """
         strategy = self.strategies.get(strategy_id)
-        if not strategy or not strategy.active:
+        if not strategy or not strategy.enabled:
             return
 
         try:

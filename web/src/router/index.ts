@@ -30,6 +30,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '策略' }
   },
   {
+    path: '/strategy/:strategyId',
+    name: 'StrategyDetails',
+    component: () => import('@/views/StrategyDetails.vue'),
+    meta: { title: '策略详情' }
+  },
+  {
     path: '/rotation',
     name: 'Rotation',
     component: () => import('@/views/Rotation.vue'),

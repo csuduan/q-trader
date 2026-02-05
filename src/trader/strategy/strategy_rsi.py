@@ -67,17 +67,17 @@ class Signal(BaseModel):
     """交易信号"""
     side: int = 0  # 信号方向: 1多头, -1空头,0无信号
     entry_price: float = 0.0  # 开仓价格
-    entry_time: datetime = None  # 开仓时间
+    entry_time: Optional[datetime] = None  # 开仓时间
     entry_volume: int = 0  # 开仓目标手数
     exit_price: float = 0.0  # 平仓价格
-    exit_time: datetime = None  # 平仓时间
+    exit_time: Optional[datetime] = None  # 平仓时间
     exit_reason: str = ""  # 平仓原因
 
     # 真实入场信息
     entry_order_id: Optional[str] = None  # 开仓订单信息
     exit_order_id: Optional[str] = None  # 平仓订单信息
     pos_volume: int = 0     # 持仓手数
-    pos_price: float|None = None # 持仓均价
+    pos_price: Optional[float] = None # 持仓均价
 
 
     def __str__(self) -> str:
@@ -149,17 +149,58 @@ class RsiStrategy(BaseStrategy):
     def get_params(self) -> dict:
         """获取策略参数"""
         return self.rsi_param.model_dump()
-    
+
     def get_signal(self) -> dict:
         """获取当前信号"""
         return self.signal.model_dump() if self.signal else None
+
     def get_trading_status(self) -> str:
         """是否正在交易中(开仓中，平仓中)"""
         for cmd in self.pending_cmds.values():
             if cmd.is_active:
                 return "开仓中" if cmd.offset == Offset.OPEN else "平仓中"
         return ""
-    
+
+    def update_params(self, params: dict) -> None:
+        """
+        更新策略参数（只更新内存，不写入文件）
+
+        Args:
+            params: 要更新的参数字典
+        """
+        for key, value in params.items():
+            if hasattr(self.rsi_param, key):
+                # 处理时间类型的参数
+                if key in ["trade_start_time", "trade_end_time", "force_exit_time", "day_start"] and isinstance(value, str):
+                    value = _parse_time(value)
+                setattr(self.rsi_param, key, value)
+            else:
+                logger.warning(f"策略 [{self.strategy_id}] 参数 {key} 不存在")
+
+        logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
+
+    def update_signal(self, signal: dict) -> None:
+        """
+        更新策略信号（只更新内存，不写入文件）
+
+        Args:
+            signal: 要更新的信号字典
+        """
+        if not self.signal:
+            self.signal = Signal()
+
+        for key, value in signal.items():
+            if hasattr(self.signal, key):
+                # 处理datetime类型的参数
+                if key in ["entry_time", "exit_time"] and isinstance(value, str):
+                    try:
+                        value = datetime.fromisoformat(value)
+                    except ValueError:
+                        pass
+                setattr(self.signal, key, value)
+
+        logger.info(f"策略 [{self.strategy_id}] 信号已更新: side={self.signal.side}")
+
 
     def _is_in_trade_window(self, bar_time: time) -> bool:
         """判断是否在交易窗口内"""
@@ -291,8 +332,7 @@ class RsiStrategy(BaseStrategy):
             # 只处理指定合约的K线
             if bar.symbol != self.rsi_param.symbol:
                 return
-
-            
+   
 
             logger.info(f"策略 [{self.strategy_id}] 收到新bar: {bar.symbol} {bar.interval} {bar.datetime} open：{bar.open_price} close:{bar.close_price} type:{bar.type}")
 
@@ -461,14 +501,18 @@ class RsiStrategy(BaseStrategy):
             signal: 交易信号
         """
         if signal.exit_time:
-            # 平仓处理
+            # 平仓处理 - 检查是否暂停平仓
+            if self.closing_paused:
+                logger.info(f"策略 [{self.strategy_id}] 平仓已暂停，跳过平仓操作")
+                return
+
             if signal.entry_order_id:
                 entry_cmd = self.pending_cmds[signal.entry_order_id]
                 if entry_cmd and entry_cmd.is_active:
                     # 当前开仓报单未完成，先撤单，等待下一次执行平仓
                     self.cancel_order_cmd(entry_cmd)
                     return
-                
+
             if not signal.exit_order_id:
                 exit_cmd = OrderCmd(
                     symbol=f"{self.rsi_param.exchange}.{self.rsi_param.symbol}",
@@ -480,7 +524,11 @@ class RsiStrategy(BaseStrategy):
                 signal.exit_order_id = exit_cmd.cmd_id
                 self.send_order_cmd(exit_cmd)
         else:
-            # 开仓处理
+            # 开仓处理 - 检查是否暂停开仓
+            if self.opening_paused:
+                logger.info(f"策略 [{self.strategy_id}] 开仓已暂停，跳过开仓操作")
+                return
+
             if not signal.entry_order_id:
                 entry_cmd = OrderCmd(
                     symbol=f"{self.rsi_param.exchange}.{self.rsi_param.symbol}",
