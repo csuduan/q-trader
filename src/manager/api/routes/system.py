@@ -110,48 +110,21 @@ async def update_alert_wechat(
     trading_manager=Depends(get_trading_manager),
 ):
     """
-    更新微信告警配置
+    更新微信告警配置（仅更新内存中的配置，不保存到文件）
 
     - **account_id**: 可选，指定账户ID（多账号模式）
     - **alert_wechat**: 是否启用微信告警
     """
-    import yaml
-    from pathlib import Path
-
-    trader = trading_manager.get_trader(account_id)
-    if not trader:
-        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
-
-    # 更新配置文件
+    # 更新内存中的账户配置
     account_config = trading_manager.account_configs_map.get(account_id)
     if not account_config:
         return error_response(code=404, message=f"账户配置 [{account_id}] 不存在")
 
     # 更新配置对象
     account_config.alert_wechat = alert_wechat
+    logger.info(f"账户 [{account_id}] 微信告警配置已更新: {alert_wechat}")
 
-    # 保存到配置文件
-    config_path = Path(account_config.paths.config if hasattr(account_config, 'paths') and account_config.paths else "./config") / f"account-{account_id}.yaml"
-    if not config_path.exists():
-        # 尝试从配置目录查找
-        from src.utils.config_loader import ConfigLoader
-        config_loader = ConfigLoader()
-        config_dir = config_loader.config_dir
-        config_path = config_dir / f"account-{account_id}.yaml"
-
-    if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
-
-        config_data["alert_wechat"] = alert_wechat
-
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(config_data, f, allow_unicode=True)
-
-        logger.info(f"账户 [{account_id}] 微信告警配置已更新: {alert_wechat}")
-        return success_response(data={"alert_wechat": alert_wechat}, message="微信告警配置已更新")
-    else:
-        return error_response(code=404, message=f"配置文件不存在: {config_path}")
+    return success_response(data={"alert_wechat": alert_wechat}, message="微信告警配置已更新")
 
 
 @router.get("/alert-wechat")
