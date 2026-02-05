@@ -100,6 +100,17 @@
                   />
                 </el-form-item>
               </el-col>
+              <el-col :span="12">
+                <el-form-item label="微信告警">
+                  <el-switch
+                    v-model="alertWechat"
+                    :disabled="updatingAlertWechat"
+                    active-text="启用"
+                    inactive-text="禁用"
+                  />
+                  <span class="ml-2" v-if="alertWechat">订单拒绝/策略报单时发送微信通知</span>
+                </el-form-item>
+              </el-col>
             </el-row>
             <el-form-item>
               <el-button
@@ -206,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, ElSpace } from 'element-plus'
 import { useStore } from '@/stores'
 import { systemApi, accountApi } from '@/api'
@@ -249,9 +260,11 @@ const pausing = ref(false)
 const resuming = ref(false)
 const showConnectDialog = ref(false)
 const updatingRisk = ref(false)
+const updatingAlertWechat = ref(false)
 const loadingTasks = ref(false)
 const operatingJob = ref<string | null>(null)
 const tasks = ref<Job[]>([])
+const alertWechat = ref(false)
 
 const connectForm = reactive({
   username: '',
@@ -278,6 +291,50 @@ const riskForm = reactive({
   max_order_volume: 50,
   max_split_volume: 5,
   order_timeout: 5
+})
+
+// 监听 alertWechat 变化，自动保存
+watch(alertWechat, async (newValue) => {
+  await updateAlertWechat(newValue)
+})
+
+async function updateAlertWechat(value: boolean) {
+  updatingAlertWechat.value = true
+  try {
+    await systemApi.updateAlertWechat(value, store.selectedAccountId || undefined)
+    ElMessage.success('微信告警配置已更新')
+    await store.loadAllAccounts()
+  } catch (error: any) {
+    console.error('更新微信告警配置失败:', error)
+    ElMessage.error(`更新微信告警配置失败: ${error.message}`)
+    // 更新失败时恢复原值
+    await loadAlertWechat()
+  } finally {
+    updatingAlertWechat.value = false
+  }
+}
+
+async function loadAlertWechat() {
+  try {
+    const result = await systemApi.getAlertWechat(store.selectedAccountId || undefined)
+    alertWechat.value = result.alert_wechat
+  } catch (error: any) {
+    console.error('获取微信告警配置失败:', error)
+  }
+}
+
+// 监听当前账户变化，重新加载 alert_wechat
+watch(() => store.selectedAccountId, () => {
+  if (store.selectedAccountId) {
+    loadAlertWechat()
+  }
+})
+
+onMounted(() => {
+  loadTasks()
+  if (store.selectedAccountId) {
+    loadAlertWechat()
+  }
 })
 
 async function handleConnect() {

@@ -34,6 +34,23 @@ export const systemApi = {
   },
 
   /**
+   * 更新微信告警配置
+   */
+  updateAlertWechat: async (alertWechat: boolean, accountId?: string) => {
+    return api.put('/system/alert-wechat', {
+      alert_wechat: alertWechat,
+      account_id: accountId
+    })
+  },
+
+  /**
+   * 获取微信告警配置
+   */
+  getAlertWechat: async (accountId?: string): Promise<{ alert_wechat: boolean }> => {
+    return api.get<{ alert_wechat: boolean }>('/system/alert-wechat', { params: { account_id: accountId } })
+  },
+
+  /**
    * 连接到交易系统
    */
   connect: async (username?: string, password?: string, accountId?: string): Promise<{ success: boolean }> => {
