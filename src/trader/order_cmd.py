@@ -151,8 +151,10 @@ class OrderCmd():
         twap_duration: Optional[int] = None,
         # 控制参数
         total_timeout: int = 300,
-        max_retries: int = 3, 
+        max_retries: int = 3,
         order_timeout: float = 15.0,
+        # 来源标识
+        source: str = "",
     ):
         self.cmd_id = uuid.uuid4().hex
         self.symbol = symbol
@@ -167,6 +169,7 @@ class OrderCmd():
         self.total_timeout = total_timeout #总超时时间
         self.max_retries = max_retries #超时重试次数
         self.order_timeout = order_timeout #单次报单超时
+        self.source = source  # 来源标识，格式："策略:{strategy_id}" 或 "换仓:{strategy_id}"
 
         # 状态
         self.status = OrderCmdStatus.PENDING
@@ -472,13 +475,14 @@ class OrderCmd():
             "status": self.status,
             "finish_reason": self.finish_reason if self.finish_reason else None,
             "symbol": self.symbol,
-            "direction": self.direction,
-            "offset": self.offset,
+            "direction": self.direction.value,
+            "offset": self.offset.value,
             "volume": self.volume,
             "filled_volume": self.filled_volume,
             "filled_price": round(self.filled_price, 2),
             "remaining_volume": self.remaining_volume,
             "is_active": self.is_active,
+            "source": self.source,
             "created_at": self.created_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,

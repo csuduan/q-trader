@@ -215,6 +215,11 @@
 
           <el-table :data="orderCmds" stripe v-loading="loading" height="400">
             <el-table-column prop="cmd_id" label="指令ID" width="180" show-overflow-tooltip />
+            <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ row.source || '-' }}
+              </template>
+            </el-table-column>
             <el-table-column prop="symbol" label="合约" width="120" />
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">

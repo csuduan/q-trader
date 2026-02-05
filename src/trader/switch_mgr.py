@@ -21,7 +21,7 @@ from src.utils.database import get_session
 from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.core.trading_engine import TradingEngine
-from src.trader.order_cmd import OrderCmdStatus, SplitStrategyType
+from src.trader.order_cmd import OrderCmd, SplitStrategyType
 from src.models.object import OrderCmdFinishReason
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
@@ -315,7 +315,7 @@ class SwitchPosManager:
             for instruction in all_instructions:
                 if(instruction.filled_volume==instruction.volume):
                     instruction.status = "COMPLETED"
-                    
+
                 if instruction.status not in ("COMPLETED"):
                     instruction.status = "PENDING"
                     instruction.error_message = None
@@ -334,54 +334,38 @@ class SwitchPosManager:
                     continue
 
                 # 创建报单指令
-                cmd_id = self._create_order_cmd(instruction)
-                if cmd_id:
-                    instruction.current_order_id = cmd_id
+                price = instruction.price if instruction.price and instruction.price > 0 else None
+                order_cmd: OrderCmd = OrderCmd(
+                    symbol=instruction.symbol,
+                    direction=instruction.direction,
+                    offset=instruction.offset,
+                    volume=instruction.remaining_volume,
+                    price=price,
+                    split_strategy=SplitStrategyType.SIMPLE,
+                    max_volume_per_order=self.config.trading.risk_control.max_split_volume,
+                    order_interval=0.5,
+                    total_timeout=self.config.trading.risk_control.order_timeout * 10,  # 总超时为单笔超时的10倍
+                    max_retries=3,
+                    order_timeout=self.config.trading.risk_control.order_timeout,
+                    source=f"换仓:{instruction.symbol}",
+                )
+                self.trading_engine.insert_order_cmd(order_cmd)
+                if order_cmd:
+                    instruction.current_order_id = order_cmd.cmd_id
                     instruction.status = "RUNNING"
                     instruction.order_placed_time = datetime.now()
-                    logger.info(f"为指令 {instruction.symbol} 创建报单指令: {cmd_id}")
+                    logger.info(f"为指令 {instruction.symbol} 创建报单指令: {order_cmd.cmd_id}")
 
             # 监控OrderCmd执行状态
             self._monitor_order_commands(all_instructions)
 
         except Exception as e:
-            logger.error(f"换仓执行时出错: {e}")
+            logger.exception(f"换仓执行时出错: {e}")
         finally:
             self._update_instructions(all_instructions)
             self.working = False
             logger.info("换仓任务结束")
 
-    def _create_order_cmd(self, instruction: RotationInstructionPo) -> Optional[str]:
-        """
-        为换仓指令创建OrderCmd
-
-        Args:
-            instruction: 换仓指令
-
-        Returns:
-            OrderCmd ID
-        """
-        try:
-            price = instruction.price if instruction.price and instruction.price > 0 else None
-
-            cmd_id = self.trading_engine.insert_order_cmd(
-                symbol=instruction.symbol,
-                direction=instruction.direction,
-                offset=instruction.offset,
-                volume=instruction.remaining_volume,
-                price=price,
-                split_strategy=SplitStrategyType.SIMPLE,
-                max_volume_per_order=self.config.trading.risk_control.max_split_volume,
-                order_interval=0.5,
-                total_timeout=self.config.trading.risk_control.order_timeout * 10,  # 总超时为单笔超时的10倍
-                max_retries=3,
-                order_timeout=self.config.trading.risk_control.order_timeout,
-            )
-
-            return cmd_id
-        except Exception as e:
-            logger.exception(f"创建OrderCmd失败: {e}")
-            return None
 
     def _monitor_order_commands(
         self,

@@ -206,14 +206,10 @@ class StrategyRes(BaseModel):
     inited: bool
     config: dict
     params: dict
-    # 运行时状态
-    position_side: int = 0
-    holding: bool = False
-    entry_price: float = 0.0
-    trade_count: int = 0
-    total_pnl: float = 0.0
+    # 信号信息（从策略的get_signal()获取）
+    signal: dict | None = None
+    trading_status: str | None = None
     # 时间戳
-    last_trade_date: Optional[str] = None
     updated_at: datetime = Field(default_factory=datetime.now)
 
     model_config = {"populate_by_name": True}
@@ -315,3 +311,23 @@ class TraderStatusRes(BaseModel):
     last_heartbeat: Optional[datetime] = None
     restart_count: int = 0
     socket_path: Optional[str] = None
+
+
+class OrderCmdRes(BaseModel):
+    """报单指令响应"""
+
+    cmd_id: str
+    status: str
+    symbol: str
+    filled_volume: int
+    volume: int
+    direction: Optional[str] = None
+    offset: Optional[str] = None
+    limit_price: Optional[float] = None
+    source: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    total_orders: int = 0
+    finish_reason: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)

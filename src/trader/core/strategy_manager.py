@@ -441,6 +441,8 @@ class StrategyManager:
             order_cmd: 订单指令对象
         """
         try:
+            # 设置来源标识
+            order_cmd.source = f"策略:{strategy_id}"
             self.cmd_strategy_map[order_cmd.cmd_id] = strategy_id
             self.trading_engine.insert_order_cmd(order_cmd)
             logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")

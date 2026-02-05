@@ -415,3 +415,19 @@ export interface TraderStatus {
   restart_count: number
   socket_path: string | null
 }
+
+/** 报单指令 */
+export interface OrderCmd {
+  cmd_id: string
+  status: string
+  symbol: string
+  filled_volume: number
+  volume: number
+  direction?: 'BUY' | 'SELL' | null
+  offset?: 'OPEN' | 'CLOSE' | 'CLOSETODAY' | null
+  limit_price?: number | null
+  source?: string | null
+  started_at?: string | null
+  created_at: string
+  updated_at: string
+}
