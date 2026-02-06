@@ -8,8 +8,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from src.utils.database import get_session
 from src.models.po import AlarmPo
+from src.utils.database import get_session
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

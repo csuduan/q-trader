@@ -17,9 +17,9 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi_offline import FastAPIOffline
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_offline import FastAPIOffline
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.app_context import AppContext, get_app_context
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     all_accounts = _app_config.accounts
     active_accounts = [acc for acc in all_accounts if acc.enabled]
     disabled_accounts = [acc for acc in all_accounts if not acc.enabled]
-        # 提取所有账户
+    # 提取所有账户
     all_accounts = _app_config.accounts
     active_accounts = [acc for acc in all_accounts if acc.enabled]
     disabled_accounts = [acc for acc in all_accounts if not acc.enabled]

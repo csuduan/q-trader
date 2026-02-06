@@ -9,12 +9,12 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
 
 from src.app_context import get_app_context
-from src.manager.api.responses import error_response, success_response
-from src.models.po import JobPo
-from src.utils.scheduler import TaskScheduler
-from src.manager.core.trading_manager import TradingManager
 from src.manager.api.dependencies import get_trading_manager
+from src.manager.api.responses import error_response, success_response
+from src.manager.core.trading_manager import TradingManager
+from src.models.po import JobPo
 from src.utils.logger import get_logger
+from src.utils.scheduler import TaskScheduler
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/jobs", tags=["定时任务"])
 @router.get("")
 async def get_jobs(
     account_id: str = Query(..., description="账户ID"),
-    trading_manager:TradingManager = Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取定时任务列表
@@ -59,7 +59,7 @@ async def toggle_job(
     job_id: str,
     request: JobToggleRequest,
     account_id: str = Query(..., description="账户ID"),
-    trading_manager:TradingManager = Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     切换任务启用/禁用状态
@@ -73,7 +73,9 @@ async def toggle_job(
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
     success = await trader.toggle_job(job_id, request.enabled)
     if success:
-        return success_response(data={"job_id": job_id, "enabled": request.enabled}, message="任务状态已更新")
+        return success_response(
+            data={"job_id": job_id, "enabled": request.enabled}, message="任务状态已更新"
+        )
     return error_response(code=500, message="更新任务状态失败")
 
 
@@ -81,7 +83,7 @@ async def toggle_job(
 async def trigger_job(
     job_id: str,
     account_id: str = Query(..., description="账户ID"),
-    trading_manager:TradingManager = Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     立即触发定时任务
@@ -103,7 +105,7 @@ async def operate_job(
     job_id: str,
     request: JobOperateRequest,
     account_id: str = Query(..., description="账户ID"),
-    trading_manager:TradingManager = Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     操作定时任务（暂停/恢复/触发）

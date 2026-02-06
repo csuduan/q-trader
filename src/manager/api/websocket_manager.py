@@ -45,7 +45,6 @@ class WebSocketManager:
         self.active_connections.discard(websocket)
         logger.info(f"WebSocket连接已断开，当前连接数: {len(self.active_connections)}")
 
-
     async def broadcast(self, message: dict):
         """广播消息到所有连接"""
         if not self.active_connections:

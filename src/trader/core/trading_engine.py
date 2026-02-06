@@ -10,15 +10,25 @@ import uuid
 from datetime import datetime
 from threading import Thread
 from typing import Any, Dict, List, Optional, Union
+
 import pandas as pd
 
-
 from src.app_context import get_app_context
-from src.utils.config_loader import AccountConfig, AppConfig
-from src.models.object import AccountData, CancelRequest, Direction, Offset, OrderRequest, TradeData,OrderData
+from src.models.object import (
+    AccountData,
+    CancelRequest,
+    Direction,
+    Offset,
+    OrderData,
+    OrderRequest,
+    OrderStatus,
+    PositionData,
+    TradeData,
+)
 from src.trader.core.risk_control import RiskControl
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
 from src.trader.order_cmd_executor import OrderCmdExecutor
+from src.utils.config_loader import AccountConfig, AppConfig
 from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
 from src.utils.wecomm import send_wechat
@@ -41,7 +51,7 @@ class TradingEngine:
             config: 配置对象（AppConfig 或 AccountConfig）
             event_engine: 事件引擎实例（可选，如果不提供则创建新的）
         """
-        self.config:AccountConfig = config
+        self.config: AccountConfig = config
         self.account_id = config.account_id  # type: ignore[attr-defined]
         logger.info(
             f"TradingEngine __init__, account_id: {self.account_id}, config_id: {id(config)}"
@@ -50,10 +60,15 @@ class TradingEngine:
         from src.trader.adapters.base_gateway import BaseGateway
 
         self.gateway: Optional[BaseGateway] = None
-        self.paused = config.trading.paused  # type: ignore[attr-defined]
+        self.paused = config.trading.paused if config.trading else False
 
         # 风控模块（使用配置文件中的默认值，启动后会从数据库加载）
-        self.risk_control = RiskControl(config.trading.risk_control)  # type: ignore[attr-defined]
+        risk_config = config.trading.risk_control if config.trading else None
+        if risk_config:
+            self.risk_control = RiskControl(risk_config)
+        else:
+            from src.utils.config_loader import RiskControlConfig
+            self.risk_control = RiskControl(RiskControlConfig())
 
         # 事件引擎
         self.event_engine = ctx.get_event_engine()
@@ -69,7 +84,7 @@ class TradingEngine:
         # Gateway初始化
         self._init_gateway()
         # 加载风控数据
-        self.reload_risk_control_config() # type: ignore[attr-defined]
+        self.reload_risk_control_config()  # type: ignore[attr-defined]
 
     def start(self):
         """
@@ -110,9 +125,14 @@ class TradingEngine:
     def account(self):
         if self.gateway is None:
             return None
-        account:AccountData = self.gateway.get_account()
+        account = self.gateway.get_account()
+        if account is None:
+            return None
         account.gateway_connected = self.gateway.connected
-        account.user_id = self.config.gateway.broker.user_id or "--"
+        user_id = None
+        if self.config.gateway and self.config.gateway.broker:
+            user_id = self.config.gateway.broker.user_id
+        account.user_id = user_id or "--"
         account.risk_status = self.risk_control.get_status()
         account.trade_paused = self.paused
         return account
@@ -128,7 +148,9 @@ class TradingEngine:
         if self.gateway is None:
             return datetime.now()
         trading_day = self.gateway.get_trading_day()
-        return datetime.strptime(trading_day, "%Y%m%d").date()
+        if trading_day is None:
+            return datetime.now()
+        return datetime.strptime(trading_day, "%Y%m%d")
 
     @property
     def positions(self):
@@ -243,11 +265,11 @@ class TradingEngine:
     def insert_order(
         self,
         symbol: str,
-        direction: str,
-        offset: str,
+        direction: Union[str, Direction],
+        offset: Union[str, Offset],
         volume: int,
         price: float = 0,
-    ) -> Optional[str]:
+    ) -> Optional[OrderData]:
         """
         下单
 
@@ -259,7 +281,7 @@ class TradingEngine:
             price: 0-市价，>0限价
 
         Returns:
-            Optional[str]: 委托单ID，失败返回None
+            Optional[OrderData]: 委托单数据，失败返回None
         """
         if self.gateway is None or not self.gateway.connected:
             logger.error("交易引擎未连接，无法下单")
@@ -278,24 +300,30 @@ class TradingEngine:
             if self.gateway is None:
                 raise Exception("Gateway未初始化")
 
+            # 转换为枚举类型
+            if isinstance(direction, str):
+                direction = Direction(direction)
+            if isinstance(offset, str):
+                offset = Offset(offset)
+
             req = OrderRequest(
                 symbol=symbol,
-                direction=Direction(direction),
-                offset=Offset(offset),
+                direction=direction,
+                offset=offset,
                 volume=volume,
                 price=price if price > 0 else None,
             )
 
             order_data = self.gateway.send_order(req)
 
-            if order_data:
+            if order_data is not None:
                 logger.bind(tags=["trade"]).info(
                     f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_data.order_id}"
                 )
                 # 更新风控计数
                 self.risk_control.on_order_inserted()
 
-            return order_data.order_id if order_data else None
+            return order_data
 
         except Exception as e:
             raise Exception(f"下单失败: {e}")
@@ -363,6 +391,20 @@ class TradingEngine:
                 },
             )
 
+    def get_position(self, symbol: str) -> Optional[PositionData]:
+        """
+        获取合约持仓数据（通过Gateway）
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            Optional[PositionData]: 持仓数据，失败返回None
+        """
+        if self.gateway:
+            return self.gateway.get_positions().get(symbol, None)
+        return None
+
     def get_status(self) -> Dict[str, Any]:
         """
         获取引擎状态
@@ -377,7 +419,7 @@ class TradingEngine:
             "daily_orders": self.risk_control.daily_order_count,
             "daily_cancels": self.risk_control.daily_cancel_count,
         }
-    
+
     def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:
         """
         获取合约K线数据（通过Gateway）
@@ -406,8 +448,8 @@ class TradingEngine:
         if self.gateway:
             self.gateway.subscribe(symbol)
         return True
-    
-    def subscribe_bars(self, symbol: str,interval:str) -> bool:
+
+    def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """
         订阅合约行情（通过Gateway）
 
@@ -418,7 +460,7 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            self.gateway.subscribe_bars(symbol,interval)
+            self.gateway.subscribe_bars(symbol, interval)
         return True
 
     def _emit_event(self, event_type: str, data: Any) -> None:
@@ -448,31 +490,32 @@ class TradingEngine:
 
     def _on_bar(self, bar):
         """Gateway bar回调 → EventEngine"""
-        self.event_engine.put(EventTypes.KLINE_UPDATE, bar)
+        if self.event_engine:
+            self.event_engine.put(EventTypes.KLINE_UPDATE, bar)
 
-    def _on_order(self, order:OrderData):
+    def _on_order(self, order: OrderData):
         """Gateway order回调 → EventEngine"""
-        self.event_engine.put(EventTypes.ORDER_UPDATE, order)
-        if order.status == "REJECTED" and self.config.alert_wechat:
+        if self.event_engine:
+            self.event_engine.put(EventTypes.ORDER_UPDATE, order)
+        if order.status == OrderStatus.REJECTED and self.config.alert_wechat:
             send_wechat(f"账户[{self.account_id}]告警：{order.status_msg}")
-            
 
     def _on_trade(self, trade):
         """Gateway trade回调 → EventEngine"""
-        self.event_engine.put(EventTypes.TRADE_UPDATE, trade)
+        if self.event_engine:
+            self.event_engine.put(EventTypes.TRADE_UPDATE, trade)
 
     def _on_position(self, position):
         """Gateway position回调 → EventEngine"""
-        self.event_engine.put(EventTypes.POSITION_UPDATE, position)
+        if self.event_engine:
+            self.event_engine.put(EventTypes.POSITION_UPDATE, position)
 
     def _on_account(self, account):
         """Gateway account回调 → EventEngine"""
-        self.event_engine.put(EventTypes.ACCOUNT_UPDATE, account)
+        if self.event_engine:
+            self.event_engine.put(EventTypes.ACCOUNT_UPDATE, account)
 
-    def insert_order_cmd(
-        self,
-        cmd: OrderCmd
-    ) -> Optional[str]:
+    def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
         """
         创建报单指令
 
@@ -498,9 +541,11 @@ class TradingEngine:
         # 注册到执行器（注册即启动）
         if self._order_cmd_executor:
             self._order_cmd_executor.register(cmd)
-        
+
         if "策略-" in cmd.source and self.config.alert_wechat:
-            send_wechat(f"账户[{self.account_id}提醒]：创建新的报单指令{cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手")
+            send_wechat(
+                f"账户[{self.account_id}提醒]：创建新的报单指令{cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手"
+            )
 
         logger.info(f"创建报单指令: {cmd.cmd_id} {cmd.symbol} {cmd.direction} {cmd.volume}手")
         return cmd.cmd_id

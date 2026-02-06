@@ -9,69 +9,96 @@ from unittest.mock import MagicMock, Mock
 
 from src.models.object import (
     Direction,
+    Exchange,
     Offset,
     OrderCmdFinishReason,
     OrderData,
     OrderRequest,
     OrderStatus,
+    PositionData,
     TradeData,
 )
 from src.trader.order_cmd import (
     ActiveOrderInfo,
+    SimpleSplitStrategy,
     OrderCmd,
     OrderCmdStatus,
-    SimpleSplitStrategy,
     SplitStrategyType,
-    TWAPSplitStrategy,
+    SplitOrder,
 )
 
 
 def test_simple_split_strategy():
     """测试简单拆单策略"""
-    # 创建模拟的OrderCmd
+    # 创建模拟的 OrderCmd
     cmd = Mock(spec=OrderCmd)
     cmd.max_volume_per_order = 10
+    cmd.volume = 100
+    cmd.direction = Direction.BUY
+    cmd.offset = Offset.OPEN
 
     strategy = SimpleSplitStrategy(cmd)
 
-    # 测试100手拆单，最大单次10手
-    orders = strategy.split(100)
+    # 测试拆单 - 应该返回10个订单
+    pos = None  # 开仓不需要持仓
+    count = strategy.split(pos)
+    assert count == 10, f"Expected 10 orders, got {count}"
 
-    assert len(orders) == 10, f"Expected 10 orders, got {len(orders)}"
-    for order in orders:
-        assert order.volume == 10, f"Expected volume 10, got {order.volume}"
+    # 测试 get_next 获取订单
+    order1 = strategy.get_next()
+    assert order1 is not None, "Expected first order"
+    assert order1.volume == 10, f"Expected volume 10, got {order1.volume}"
 
     print("test_simple_split_strategy passed")
 
 
-def test_twap_split_strategy():
-    """测试TWAP拆单策略"""
+def test_simple_split_strategy_close_today_yesterday():
+    """测试平今平昨拆单"""
+    # 创建模拟的 OrderCmd
     cmd = Mock(spec=OrderCmd)
     cmd.max_volume_per_order = 10
-    cmd.twap_duration = 60  # 60秒
+    cmd.volume = 80
+    cmd.direction = Direction.SELL
+    cmd.offset = Offset.CLOSE
 
-    strategy = TWAPSplitStrategy(cmd)
+    # 创建持仓数据
+    pos = Mock(spec=PositionData)
+    pos.pos_long = 100
+    pos.pos_short = 0
+    pos.pos_long_td = 50  # 今仓50
+    pos.exchange = Exchange.SHFE
 
-    # 测试100手拆单，60秒内执行
-    orders = strategy.split(100)
+    strategy = SimpleSplitStrategy(cmd)
 
-    # 应该拆分为最多60单（每秒最多1单）或者最少10单（按最大手数）
-    assert len(orders) >= 10, f"Expected at least 10 orders, got {len(orders)}"
-    assert len(orders) <= 60, f"Expected at most 60 orders, got {len(orders)}"
+    # 测试拆单
+    count = strategy.split(pos)
+    # 应该拆成: 平今5个订单(50手) + 平昨3个订单(30手) = 8个订单
+    assert count == 8, f"Expected 8 orders, got {count}"
 
-    # 验证时间间隔递增
-    for i in range(len(orders) - 1):
-        assert (
-            orders[i + 1].delay_seconds >= orders[i].delay_seconds
-        ), "TWAP orders should have increasing delays"
+    # 先获取平今订单
+    for _ in range(5):
+        order = strategy.get_next()
+        assert order is not None
+        assert order.volume == 10
+        assert order.offset == Offset.CLOSETODAY
 
-    print("test_twap_split_strategy passed")
+    # 再获取平昨订单
+    for _ in range(3):
+        order = strategy.get_next()
+        assert order is not None
+        assert order.volume == 10
+        assert order.offset == Offset.CLOSE
+
+    # 没有更多订单
+    order = strategy.get_next()
+    assert order is None
+
+    print("test_simple_split_strategy_close_today_yesterday passed")
 
 
 def test_order_cmd_initialization():
     """测试OrderCmd初始化"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-1",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -79,7 +106,7 @@ def test_order_cmd_initialization():
         price=3500.0,
     )
 
-    assert cmd.cmd_id == "test-cmd-1"
+    assert cmd.cmd_id is not None
     assert cmd.symbol == "SHFE.rb2505"
     assert cmd.direction == Direction.BUY
     assert cmd.offset == Offset.OPEN
@@ -95,7 +122,6 @@ def test_order_cmd_initialization():
 def test_order_cmd_close():
     """测试OrderCmd关闭（取消）"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-2",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -110,7 +136,7 @@ def test_order_cmd_close():
     cmd.close()
 
     assert cmd.status == OrderCmdStatus.FINISHED
-    assert cmd.finish_reason == OrderCmdFinishReason.CANCELLED
+    assert cmd.finish_reason == "指令已取消"
     assert cmd.finished_at is not None
 
     print("test_order_cmd_close passed")
@@ -119,7 +145,6 @@ def test_order_cmd_close():
 def test_order_cmd_order_update():
     """测试订单更新处理"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-3",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -128,8 +153,49 @@ def test_order_cmd_order_update():
     )
 
     cmd.all_order_ids.append("order-1")
+    cmd._cur_split_order = SplitOrder(volume=10)
 
-    # 测试活动订单
+    # 测试非活动订单 - 需要先设置 _pending_order
+    order = OrderData(
+        order_id="order-1",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        traded=10,
+        price=Decimal("3500"),
+        traded_price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.FINISHED,
+    )
+
+    cmd._pending_order = order
+    cmd.update("ORDER_UPDATE", order)
+
+    # 已完成订单应该被清除
+    assert cmd._pending_order is None
+    # 成交应该被统计
+    assert cmd.filled_volume == 10
+    assert cmd.filled_price == 3500.0
+
+    print("test_order_cmd_order_update passed")
+
+
+def test_order_cmd_order_update_rejected():
+    """测试订单被拒处理"""
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=100,
+        price=3500.0,
+    )
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+
+    cmd.all_order_ids.append("order-1")
+
+    # 模拟订单被拒
     order = OrderData(
         order_id="order-1",
         symbol="SHFE.rb2505",
@@ -139,24 +205,25 @@ def test_order_cmd_order_update():
         traded=0,
         price=Decimal("3500"),
         account_id="test-account",
-        status=OrderStatus.NOTTRADED.value,
+        status=OrderStatus.REJECTED,
+        status_msg="资金不足",
     )
 
+    cmd._pending_order = order
     cmd.update("ORDER_UPDATE", order)
-    assert "order-1" in cmd._active_orders
 
-    # 测试非活动订单
-    order.status = OrderStatus.ALLTRADED.value
-    cmd.update("ORDER_UPDATE", order)
-    assert "order-1" not in cmd._active_orders
+    # 订单应该被清除
+    assert cmd._pending_order is None
+    # 指令应该完成
+    assert cmd.status == OrderCmdStatus.FINISHED
+    assert "订单被拒" in cmd.finish_reason
 
-    print("test_order_cmd_order_update passed")
+    print("test_order_cmd_order_update_rejected passed")
 
 
 def test_order_cmd_trade_update():
     """测试成交更新处理"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-4",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -178,8 +245,9 @@ def test_order_cmd_trade_update():
     )
 
     cmd.update("TRADE_UPDATE", trade)
-    assert cmd.filled_volume == 10
-    assert cmd.remaining_volume == 90
+    # 成交统计通过订单更新处理
+    assert cmd.filled_volume == 0
+    assert cmd.remaining_volume == 100
 
     print("test_order_cmd_trade_update passed")
 
@@ -187,35 +255,31 @@ def test_order_cmd_trade_update():
 def test_order_cmd_to_dict():
     """测试转换为字典"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-5",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
         volume=100,
         price=3500.0,
-        split_strategy=SplitStrategyType.TWAP,
-        twap_duration=300,
     )
 
     data = cmd.to_dict()
 
-    assert data["cmd_id"] == "test-cmd-5"
+    assert data["cmd_id"] is not None
     assert data["symbol"] == "SHFE.rb2505"
     assert data["direction"] == "BUY"
     assert data["volume"] == 100
     assert data["filled_volume"] == 0
     assert data["remaining_volume"] == 100
-    assert data["split_strategy"] == "TWAP"
-    assert data["is_active"] is False  # PENDING状态
+    assert "split_strategy" not in data  # 这个字段已移除
+    assert data["is_active"] is True  # PENDING状态也是活跃状态（非FINISHED）
     assert data["total_orders"] == 0
 
     print("test_order_cmd_to_dict passed")
 
 
-def test_order_cmd_tick_returns_order_request():
-    """测试 tick 方法返回 OrderRequest"""
+def test_order_cmd_trig_returns_order_request():
+    """测试 trig 方法返回 OrderRequest"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-6",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -228,11 +292,10 @@ def test_order_cmd_tick_returns_order_request():
     # 设置为运行状态并初始化拆单策略
     cmd.status = OrderCmdStatus.RUNNING
     cmd.started_at = datetime.now()
-    cmd._init_split_strategy()
+    cmd.split(None)  # 开仓不需要持仓
     cmd._load_next_split_order()
 
-    now = time.time()
-    order_req = cmd.tick(now)
+    order_req = cmd.trig()
 
     assert order_req is not None
     assert isinstance(order_req, OrderRequest)
@@ -242,13 +305,12 @@ def test_order_cmd_tick_returns_order_request():
     assert order_req.volume == 10
     assert order_req.price == 3500.0
 
-    print("test_order_cmd_tick_returns_order_request passed")
+    print("test_order_cmd_trig_returns_order_request passed")
 
 
-def test_order_cmd_on_order_submitted():
-    """测试订单提交成功回调"""
+def test_order_cmd_add_order():
+    """测试添加订单"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-7",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -256,116 +318,30 @@ def test_order_cmd_on_order_submitted():
         price=3500.0,
     )
 
-    cmd.on_order_submitted("order-1", 10)
+    order = OrderData(
+        order_id="order-1",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        traded=0,
+        price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.PENDING,
+    )
+
+    cmd.add_order(order)
 
     assert "order-1" in cmd.all_order_ids
-    assert "order-1" in cmd._active_order_info
-    assert cmd._active_order_info["order-1"].volume == 10
-    assert cmd._active_order_info["order-1"].retry_count == 0
+    assert cmd._pending_order is not None
+    assert cmd._pending_order.order_id == "order-1"
 
-    print("test_order_cmd_on_order_submitted passed")
+    print("test_order_cmd_add_order passed")
 
 
-def test_order_cmd_on_order_cancelled():
-    """测试订单撤单回调"""
+def test_order_cmd_trig_no_action_when_pending():
+    """测试 PENDING 状态下 trig 不返回任何请求"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-8",
-        symbol="SHFE.rb2505",
-        direction=Direction.BUY,
-        offset=Offset.OPEN,
-        volume=100,
-        price=3500.0,
-    )
-
-    # 先添加订单信息
-    cmd.on_order_submitted("order-1", 10)
-
-    # 模拟撤单
-    cmd.on_order_cancelled("order-1", 5)  # 5手未成交
-
-    assert "order-1" not in cmd._active_order_info
-    assert "order-1" not in cmd._active_orders
-    assert cmd._pending_retry_volume == 5
-
-    print("test_order_cmd_on_order_cancelled passed")
-
-
-def test_order_cmd_get_timeout_orders():
-    """测试获取超时订单"""
-    cmd = OrderCmd(
-        cmd_id="test-cmd-9",
-        symbol="SHFE.rb2505",
-        direction=Direction.BUY,
-        offset=Offset.OPEN,
-        volume=100,
-        price=3500.0,
-        order_timeout=1.0,
-        max_retries=3,
-    )
-
-    # 添加一个超时订单
-    cmd.on_order_submitted("order-1", 10)
-    cmd._active_order_info["order-1"].submit_time = time.time() - 2.0  # 2秒前
-
-    # 添加一个活动订单
-    order = OrderData(
-        order_id="order-1",
-        symbol="SHFE.rb2505",
-        direction=Direction.BUY,
-        offset=Offset.OPEN,
-        volume=10,
-        traded=0,
-        price=Decimal("3500"),
-        account_id="test-account",
-        status=OrderStatus.NOTTRADED.value,
-    )
-    cmd._active_orders["order-1"] = order
-
-    now = time.time()
-    timeout_orders = cmd.get_timeout_orders(now)
-
-    assert "order-1" in timeout_orders
-
-    print("test_order_cmd_get_timeout_orders passed")
-
-
-def test_order_cmd_get_active_orders():
-    """测试获取活动订单"""
-    cmd = OrderCmd(
-        cmd_id="test-cmd-10",
-        symbol="SHFE.rb2505",
-        direction=Direction.BUY,
-        offset=Offset.OPEN,
-        volume=100,
-        price=3500.0,
-    )
-
-    # 添加活动订单
-    order = OrderData(
-        order_id="order-1",
-        symbol="SHFE.rb2505",
-        direction=Direction.BUY,
-        offset=Offset.OPEN,
-        volume=10,
-        traded=0,
-        price=Decimal("3500"),
-        account_id="test-account",
-        status=OrderStatus.NOTTRADED.value,
-    )
-    cmd._active_orders["order-1"] = order
-
-    active_orders = cmd.get_active_orders()
-
-    assert "order-1" in active_orders
-    assert len(active_orders) == 1
-
-    print("test_order_cmd_get_active_orders passed")
-
-
-def test_order_cmd_tick_no_action_when_pending():
-    """测试 PENDING 状态下 tick 不返回任何请求"""
-    cmd = OrderCmd(
-        cmd_id="test-cmd-11",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -373,50 +349,50 @@ def test_order_cmd_tick_no_action_when_pending():
         price=3500.0,
     )
 
-    now = time.time()
-    order_req = cmd.tick(now)
+    order_req = cmd.trig()
 
     assert order_req is None
 
-    print("test_order_cmd_tick_no_action_when_pending passed")
+    print("test_order_cmd_trig_no_action_when_pending passed")
 
 
-def test_order_cmd_tick_respects_order_interval():
-    """测试 tick 遵守订单间隔"""
+def test_order_cmd_trig_respects_order_interval():
+    """测试 trig 遵守订单间隔"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-12",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
         volume=20,
         price=3500.0,
         max_volume_per_order=10,
-        order_interval=1.0,  # 1秒间隔
+        order_interval=0.2,  # 0.2秒间隔
     )
 
     # 设置为运行状态并初始化拆单策略
     cmd.status = OrderCmdStatus.RUNNING
     cmd.started_at = datetime.now()
-    cmd._init_split_strategy()
+    cmd.split(None)  # 开仓不需要持仓
     cmd._load_next_split_order()
 
-    now = time.time()
-
-    # 第一次 tick 应该返回订单请求
-    order_req = cmd.tick(now)
+    # 第一次 trig 应该返回订单请求
+    order_req = cmd.trig()
     assert order_req is not None
 
-    # 立即再次 tick，应该返回 None（因为间隔时间未到）
-    order_req = cmd.tick(now)
+    # 立即再次 trig，应该返回 None（因为间隔时间未到）
+    order_req = cmd.trig()
     assert order_req is None
 
-    print("test_order_cmd_tick_respects_order_interval passed")
+    # 等待间隔时间后再 trig，应该返回订单请求
+    time.sleep(0.25)
+    order_req = cmd.trig()
+    assert order_req is not None
+
+    print("test_order_cmd_trig_respects_order_interval passed")
 
 
 def test_order_cmd_finishes_when_all_filled():
     """测试全部成交后完成"""
     cmd = OrderCmd(
-        cmd_id="test-cmd-13",
         symbol="SHFE.rb2505",
         direction=Direction.BUY,
         offset=Offset.OPEN,
@@ -431,30 +407,248 @@ def test_order_cmd_finishes_when_all_filled():
     # 模拟全部成交
     cmd.filled_volume = 10
 
-    now = time.time()
-    order_req = cmd.tick(now)
+    order_req = cmd.trig()
 
     assert order_req is None
     assert cmd.status == OrderCmdStatus.FINISHED
-    assert cmd.finish_reason == OrderCmdFinishReason.ALL_COMPLETED
+    assert cmd.finish_reason == "全部完成"
 
     print("test_order_cmd_finishes_when_all_filled passed")
 
 
+def test_order_cmd_left_retry_times_calculation():
+    """测试剩余重试次数计算公式"""
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=100,  # 100手
+        price=3500.0,
+        max_volume_per_order=10,  # 每单最大10手
+    )
+
+    # 设置为运行状态以触发拆单
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(None)  # 开仓不需要持仓
+
+    # 100手 / 10手每单 = 10单
+    # _left_retry_times = 2 * 10 + 1 = 21
+    expected_left_retry_times = 21
+    assert cmd._left_retry_times == expected_left_retry_times, f"Expected _left_retry_times={expected_left_retry_times}, got {cmd._left_retry_times}"
+
+    print("test_order_cmd_left_retry_times_calculation passed")
+
+
+def test_order_cmd_trig_timeout_returns_order_for_cancel():
+    """测试 trig 方法超时时返回待撤单的 OrderData"""
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        price=3500.0,
+        total_timeout=1,  # 1秒总超时
+    )
+
+    # 设置为运行状态
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now() - timedelta(seconds=2)  # 2秒前开始
+
+    # 模拟一个活动订单
+    order = OrderData(
+        order_id="order-1",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        traded=0,
+        price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.PENDING,
+        insert_time=datetime.now() - timedelta(seconds=2),
+    )
+    cmd._pending_order = order
+
+    result = cmd.trig()
+
+    # 应该返回订单用于撤单
+    assert result is not None
+    assert isinstance(result, OrderData)
+    assert result.order_id == "order-1"
+
+    print("test_order_cmd_trig_timeout_returns_order_for_cancel passed")
+
+
+def test_order_cmd_dynamic_split_with_multiple_orders():
+    """测试拆单多次下单"""
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=25,  # 25手，每单最大10手，应该拆分为 10, 10, 5
+        price=3500.0,
+        max_volume_per_order=10,
+        order_interval=0.1,
+    )
+
+    # 设置为运行状态并初始化拆单策略
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(None)  # 开仓不需要持仓
+    cmd._load_next_split_order()
+
+    # 第一次：应该下10手
+    order_req1 = cmd.trig()
+    assert order_req1 is not None
+    assert order_req1.volume == 10
+
+    # 模拟订单成交
+    order = OrderData(
+        order_id="order-1",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        traded=10,
+        price=Decimal("3500"),
+        traded_price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.FINISHED,
+    )
+    cmd._pending_order = order
+    cmd.update("ORDER_UPDATE", order)
+    # 订单完成后，_cur_split_order.volume 已减为0，需要加载下一个
+    cmd._load_next_split_order()
+
+    # 第二次：应该下10手（需要等待间隔时间）
+    time.sleep(0.15)  # 等待超过 order_interval (0.1秒)
+    order_req2 = cmd.trig()
+    assert order_req2 is not None
+    assert order_req2.volume == 10
+
+    # 模拟订单成交
+    order2 = OrderData(
+        order_id="order-2",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        traded=10,
+        price=Decimal("3500"),
+        traded_price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.FINISHED,
+    )
+    cmd._pending_order = order2
+    cmd.update("ORDER_UPDATE", order2)
+    # 订单完成后，_cur_split_order.volume 已减为0，需要加载下一个
+    cmd._load_next_split_order()
+
+    # 第三次：应该下5手（剩余5手）
+    time.sleep(0.15)
+    order_req3 = cmd.trig()
+    assert order_req3 is not None
+    assert order_req3.volume == 5
+
+    # 模拟订单成交
+    order3 = OrderData(
+        order_id="order-3",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=5,
+        traded=5,
+        price=Decimal("3500"),
+        traded_price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.FINISHED,
+    )
+    cmd._pending_order = order3
+    cmd.update("ORDER_UPDATE", order3)
+    # 订单完成后，_cur_split_order.volume 已减为0，需要加载下一个
+    cmd._load_next_split_order()
+
+    # 第四次：应该返回None（已完成）
+    time.sleep(0.15)
+    order_req4 = cmd.trig()
+    assert order_req4 is None
+    assert cmd.status == OrderCmdStatus.FINISHED
+
+    print("test_order_cmd_dynamic_split_with_multiple_orders passed")
+
+
+def test_order_cmd_close_today_yesterday_split():
+    """测试平今平昨拆单"""
+    position = PositionData(
+        symbol="SHFE.rb2505",
+        exchange=Exchange.SHFE,
+        account_id="test-account",
+        pos=100,
+        pos_long=100,
+        pos_short=0,
+        pos_long_yd=50,
+        pos_long_td=50,
+    )
+
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.SELL,
+        offset=Offset.CLOSE,
+        volume=80,  # 平80手，应该先平今50手，再平昨30手
+        price=3500.0,
+        max_volume_per_order=10,
+    )
+
+    # 设置为运行状态并初始化拆单策略
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(position)
+
+    # 验证拆单数量: 平今5个 + 平昨3个 = 8个
+    assert cmd._strategy is not None
+    assert cmd._left_retry_times == 2 * 8 + 1
+
+    print("test_order_cmd_close_today_yesterday_split passed")
+
+
+def test_order_cmd_open_position_no_position_needed():
+    """测试开仓指令不需要持仓"""
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        price=3500.0,
+        max_volume_per_order=10,
+    )
+
+    # 开仓指令 split 不需要持仓
+    cmd.split(None)
+
+    assert cmd._strategy is not None
+    assert cmd._left_retry_times == 2 * 1 + 1  # 1个订单
+
+    print("test_order_cmd_open_position_no_position_needed passed")
+
+
 if __name__ == "__main__":
     test_simple_split_strategy()
-    test_twap_split_strategy()
+    test_simple_split_strategy_close_today_yesterday()
     test_order_cmd_initialization()
     test_order_cmd_close()
     test_order_cmd_order_update()
+    test_order_cmd_order_update_rejected()
     test_order_cmd_trade_update()
     test_order_cmd_to_dict()
-    test_order_cmd_tick_returns_order_request()
-    test_order_cmd_on_order_submitted()
-    test_order_cmd_on_order_cancelled()
-    test_order_cmd_get_timeout_orders()
-    test_order_cmd_get_active_orders()
-    test_order_cmd_tick_no_action_when_pending()
-    test_order_cmd_tick_respects_order_interval()
+    test_order_cmd_trig_returns_order_request()
+    test_order_cmd_add_order()
+    test_order_cmd_trig_no_action_when_pending()
+    test_order_cmd_trig_respects_order_interval()
     test_order_cmd_finishes_when_all_filled()
+    test_order_cmd_left_retry_times_calculation()
+    test_order_cmd_trig_timeout_returns_order_for_cancel()
+    test_order_cmd_dynamic_split_with_multiple_orders()
+    test_order_cmd_close_today_yesterday_split()
+    test_order_cmd_open_position_no_position_needed()
     print("\nAll tests passed!")

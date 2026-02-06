@@ -23,19 +23,15 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, cast
 
 from src.app_context import AppContext, get_app_context
-from src.utils.scheduler import Job
+from src.models.object import AccountData, OrderData, PositionData, TickData, TradeData, TraderState
 from src.utils.config_loader import AccountConfig, AppConfig
-from src.utils.ipc import SocketClient
-from src.models.object import AccountData, OrderData, PositionData, TradeData, TickData
 from src.utils.event_engine import EventTypes
+from src.utils.ipc import SocketClient
 from src.utils.logger import get_logger
-from src.models.object import TraderState
+from src.utils.scheduler import Job
 
 logger = get_logger(__name__)
 ctx: AppContext = get_app_context()
-
-
-
 
 
 class TraderProxy:
@@ -46,9 +42,9 @@ class TraderProxy:
     """
 
     # 连接参数
-    MAX_RETRIES = 10           # 最多重试10次
-    INITIAL_INTERVAL = 0.5     # 初始间隔0.5秒
-    MAX_INTERVAL = 30.0        # 最大间隔30秒
+    MAX_RETRIES = 10  # 最多重试10次
+    INITIAL_INTERVAL = 0.5  # 初始间隔0.5秒
+    MAX_INTERVAL = 30.0  # 最大间隔30秒
 
     def __init__(
         self,
@@ -142,9 +138,7 @@ class TraderProxy:
         """
         # 检查状态，只有STOPPED状态允许启动
         if not self._is_state(TraderState.STOPPED):
-            logger.warning(
-                f"TraderProxy [{self.account_id}] 拒绝启动，当前状态: {self._state}"
-            )
+            logger.warning(f"TraderProxy [{self.account_id}] 拒绝启动，当前状态: {self._state}")
             return False
 
         logger.info(f"TraderProxy [{self.account_id}] 开始启动...")
@@ -165,6 +159,8 @@ class TraderProxy:
             self.last_heartbeat = datetime.now()
 
             # 创建Socket客户端
+            if self.account_id is None:
+                raise ValueError("account_id is required for SocketClient")
             self.socket_client = SocketClient(
                 self.socket_path, self.account_id, self._on_msg_callback
             )
@@ -242,15 +238,16 @@ class TraderProxy:
                 return
 
             # 计算当前重试间隔（退避算法：指数增长）
-            current_interval = min(
-                self.INITIAL_INTERVAL * (2 ** attempt), self.MAX_INTERVAL
-            )
+            current_interval = min(self.INITIAL_INTERVAL * (2**attempt), self.MAX_INTERVAL)
 
             try:
                 logger.info(
                     f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1}/{self.MAX_RETRIES}), "
                     f"下次重试间隔: {current_interval:.1f}s"
                 )
+                if self.socket_client is None:
+                    logger.error(f"TraderProxy [{self.account_id}] socket_client 未初始化")
+                    break
                 success = await self.socket_client.connect()
 
                 if success:
@@ -269,9 +266,7 @@ class TraderProxy:
 
             # 如果不是最后一次重试，等待后重试
             if attempt < self.MAX_RETRIES - 1:
-                logger.info(
-                    f"TraderProxy [{self.account_id}] {current_interval:.1f}s 后重试..."
-                )
+                logger.info(f"TraderProxy [{self.account_id}] {current_interval:.1f}s 后重试...")
                 await asyncio.sleep(current_interval)
 
         # 连接失败，状态变为已停止
@@ -340,7 +335,9 @@ class TraderProxy:
         """创建新的子进程"""
         self._created_process = True
         # 构建命令
-        cmd = [
+        if self.account_id is None:
+            raise ValueError("account_id is required to create subprocess")
+        cmd: List[str] = [
             "python",
             "-m",
             "src.run_trader",
@@ -480,10 +477,14 @@ class TraderProxy:
     async def get_account(self) -> Optional[AccountData]:
         """实时获取账户数据"""
         if not self.socket_client:
-            return AccountData(account_id=self.account_id)
+            if self.account_id is None:
+                return None
+            return AccountData.model_construct(account_id=self.account_id)
         data = await self.socket_client.request("get_account", {}, timeout=5.0)
         if not data:
-            return AccountData(account_id=self.account_id)
+            if self.account_id is None:
+                return None
+            return AccountData.model_construct(account_id=self.account_id)
 
         account = AccountData(**data)
         account.status = self._state
@@ -563,7 +564,9 @@ class TraderProxy:
             return [Job(**item) for item in items]
         return []
 
-    async def send_request(self, request_type: str, data: Dict[str, Any], timeout: float = 10.0) -> Any:
+    async def send_request(
+        self, request_type: str, data: Dict[str, Any], timeout: float = 10.0
+    ) -> Any:
         """
         通用请求发送方法
 
@@ -619,7 +622,8 @@ class TraderProxy:
 
             response = await self.socket_client.request("order_req", request_data, timeout=10.0)
             order_id = response
-            return order_id
+            if isinstance(order_id, str):
+                return order_id
 
             logger.error(
                 f"TraderProxy [{self.account_id}] 下单失败: {response.get('message') if response else 'No response'}"
@@ -647,14 +651,16 @@ class TraderProxy:
         try:
             request_data = {"order_id": order_id}
 
-            response:bool = await self.socket_client.request("cancel_req", request_data, timeout=10.0)
-            return response
+            response = await self.socket_client.request(
+                "cancel_req", request_data, timeout=10.0
+            )
+            return bool(response)
 
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 撤单请求失败: {e}")
             return False
 
-    async def subscribe(self,request_data):
+    async def subscribe(self, request_data):
         """
         订阅合约行情
 
@@ -689,8 +695,8 @@ class TraderProxy:
             return False
 
         try:
-            response:bool = await self.socket_client.request("connect_gateway", {}, timeout=10.0)
-            return response or False
+            response = await self.socket_client.request("connect_gateway", {}, timeout=10.0)
+            return bool(response)
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 连接网关请求失败: {e}")
             return False
@@ -709,8 +715,10 @@ class TraderProxy:
             return False
 
         try:
-            response:bool = await self.socket_client.request("disconnect_gateway", {}, timeout=10.0)
-            return response or False
+            response = await self.socket_client.request(
+                "disconnect_gateway", {}, timeout=10.0
+            )
+            return bool(response)
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 断开网关请求失败: {e}")
             return False
@@ -729,8 +737,8 @@ class TraderProxy:
             return False
 
         try:
-            response:bool = await self.socket_client.request("pause_trading", {}, timeout=10.0)
-            return response or False
+            response = await self.socket_client.request("pause_trading", {}, timeout=10.0)
+            return bool(response)
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 暂停交易请求失败: {e}")
             return False
@@ -749,8 +757,8 @@ class TraderProxy:
             return False
 
         try:
-            response:bool = await self.socket_client.request("resume_trading", {}, timeout=10.0)
-            return response or False
+            response = await self.socket_client.request("resume_trading", {}, timeout=10.0)
+            return bool(response)
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 恢复交易请求失败: {e}")
             return False
@@ -772,7 +780,9 @@ class TraderProxy:
             return False
 
         try:
-            response = await self.socket_client.request("update_alert_wechat", {"alert_wechat": alert_wechat}, timeout=10.0)
+            response = await self.socket_client.request(
+                "update_alert_wechat", {"alert_wechat": alert_wechat}, timeout=10.0
+            )
             return response is not None
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 更新微信告警配置请求失败: {e}")
@@ -793,8 +803,9 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request("get_alert_wechat", {}, timeout=10.0)
-            if response and "alert_wechat" in response:
-                return response["alert_wechat"]
+            if isinstance(response, dict) and "alert_wechat" in response:
+                alert_wechat = response["alert_wechat"]
+                return bool(alert_wechat) if isinstance(alert_wechat, bool) else None
             return None
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 获取微信告警配置请求失败: {e}")
@@ -821,7 +832,7 @@ class TraderProxy:
             response = await self.socket_client.request(
                 "update_strategy_params",
                 {"strategy_id": strategy_id, "params": params},
-                timeout=10.0
+                timeout=10.0,
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -849,7 +860,7 @@ class TraderProxy:
             response = await self.socket_client.request(
                 "update_strategy_signal",
                 {"strategy_id": strategy_id, "signal": signal},
-                timeout=10.0
+                timeout=10.0,
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -874,9 +885,7 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "pause_strategy_opening",
-                {"strategy_id": strategy_id},
-                timeout=10.0
+                "pause_strategy_opening", {"strategy_id": strategy_id}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -901,9 +910,7 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "resume_strategy_opening",
-                {"strategy_id": strategy_id},
-                timeout=10.0
+                "resume_strategy_opening", {"strategy_id": strategy_id}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -928,9 +935,7 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "pause_strategy_closing",
-                {"strategy_id": strategy_id},
-                timeout=10.0
+                "pause_strategy_closing", {"strategy_id": strategy_id}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -955,9 +960,7 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "resume_strategy_closing",
-                {"strategy_id": strategy_id},
-                timeout=10.0
+                "resume_strategy_closing", {"strategy_id": strategy_id}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -982,9 +985,7 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "enable_strategy",
-                {"strategy_id": strategy_id},
-                timeout=10.0
+                "enable_strategy", {"strategy_id": strategy_id}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -1009,9 +1010,7 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "disable_strategy",
-                {"strategy_id": strategy_id},
-                timeout=10.0
+                "disable_strategy", {"strategy_id": strategy_id}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -1039,7 +1038,7 @@ class TraderProxy:
             response = await self.socket_client.request(
                 "get_strategy_order_cmds",
                 {"strategy_id": strategy_id, "status": status},
-                timeout=10.0
+                timeout=10.0,
             )
             return response if isinstance(response, list) else []
         except Exception as e:
@@ -1053,6 +1052,7 @@ class TraderProxy:
 
     class _GatewayStatus:
         """网关状态包装类"""
+
         def __init__(self, proxy: "TraderProxy"):
             self._proxy = proxy
 
@@ -1060,6 +1060,7 @@ class TraderProxy:
         def connected(self) -> bool:
             """是否已连接到网关"""
             return self._proxy._is_state(TraderState.CONNECTED)
+
     # ==================== 辅助方法 ====================
 
     async def restart(self) -> bool:

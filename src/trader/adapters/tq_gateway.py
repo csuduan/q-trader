@@ -3,18 +3,17 @@ TqSdk Gateway适配器
 参考文档：https://doc.shinnytech.com/tqsdk/latest/usage/
 """
 
-import threading
 import asyncio
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Union
 
-from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqSim, data_extension
-from tqsdk.objs import Account, Order, Position, Quote, Trade
-from tqsdk.datetime import _get_trading_day_from_timestamp
 from pandas import DataFrame
+from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqSim, data_extension
+from tqsdk.datetime import _get_trading_day_from_timestamp
+from tqsdk.objs import Account, Order, Position, Quote, Trade
 
-from src.utils.config_loader import GatewayConfig
 from src.models.object import (
     AccountData,
     BarData,
@@ -34,6 +33,7 @@ from src.models.object import (
     TradeData,
 )
 from src.trader.adapters.base_gateway import BaseGateway
+from src.utils.config_loader import GatewayConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -67,7 +67,7 @@ class TqGateway(BaseGateway):
         # TqSdk原始数据缓存(用于is_changing检查)
         self._account: Optional[Account] = None
         self._positions: Dict[str, Position] = {}
-        self._orders: Dict[str, Order] = {} 
+        self._orders: Dict[str, Order] = {}
         self._trades: Dict[str, Trade] = {}
         self._quotes: Dict[str, Quote] = {}
         # 自定义换仓
@@ -79,7 +79,7 @@ class TqGateway(BaseGateway):
 
         # 历史订阅的合约符号列表
         self.hist_subs: List[str] = []
-        self.kline_subs: List[(str,str)] = []
+        self.kline_subs: List[tuple[str, str]] = []
 
         # 订单引用计数
         self._order_ref = 0
@@ -103,6 +103,7 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.exception(f"TqSdk连接失败{e}")
             return False
+
     def disconnect(self) -> bool:
         """断开TqSdk连接"""
         try:
@@ -117,9 +118,9 @@ class TqGateway(BaseGateway):
     def get_trading_day(self) -> Optional[str]:
         """获取当前交易日"""
         now = datetime.now()
-        #return (now.date() - timedelta(days=1)).strftime("%Y%m%d")
-        #return now.strftime("%Y%m%d")
-        trading_calendar = self.api.get_trading_calendar(now, now + timedelta(days=30))
+        # return (now.date() - timedelta(days=1)).strftime("%Y%m%d")
+        # return now.strftime("%Y%m%d")
+        trading_calendar = self.api.get_trading_calendar(now, now + timedelta(days=30))  # type: ignore[union-attr]
         # 如果当前时间晚于20点，则交易日切换到下一天
         if now.hour >= 20:
             trading_day = now.date() + timedelta(days=1)
@@ -127,22 +128,23 @@ class TqGateway(BaseGateway):
             trading_day = now.date()
 
         # 根据交易日历查找下一个交易日
-        while not trading_calendar[trading_calendar.date==trading_day.strftime("%Y-%m-%d")]['trading'].iloc[0]:
+        while not trading_calendar[trading_calendar.date == trading_day.strftime("%Y-%m-%d")][
+            "trading"
+        ].iloc[0]:
             trading_day += timedelta(days=1)
 
         return trading_day.strftime("%Y%m%d")
 
-
     def loop_run(self) -> None:
         try:
-            broker_type = self.config.broker.type
+            broker_type = self.config.broker.type if self.config.broker else "sim"  # type: ignore[union-attr]
             # 创建认证
             logger.info(f"开始连接到TqSdk...,账户类型: {broker_type}, 账户ID: {self.account_id}")
 
             # 创建认证
-            tianqin = self.config.tianqin if self.config.tianqin else {}
-            username = getattr(tianqin, "username", "")
-            password = getattr(tianqin, "password", "")
+            tianqin_config: Any = self.config.tianqin if self.config.tianqin else None  # type: ignore[union-attr]
+            username = getattr(tianqin_config, "username", "") if tianqin_config else ""
+            password = getattr(tianqin_config, "password", "") if tianqin_config else ""
             if username and password:
                 self.auth = TqAuth(username, password)
             else:
@@ -153,9 +155,9 @@ class TqGateway(BaseGateway):
                 account = TqKq()
             elif broker_type == "real":
                 account = TqAccount(
-                    broker_id=self.config.broker.broker_name,
-                    account_id=self.config.broker.user_id,
-                    password=self.config.broker.password,
+                    broker_id=self.config.broker.broker_name if self.config.broker else "",  # type: ignore[union-attr]
+                    account_id=self.config.broker.user_id if self.config.broker else "",  # type: ignore[union-attr]
+                    password=self.config.broker.password if self.config.broker else "",  # type: ignore[union-attr]
                 )
             else:  # sim
                 account = TqSim()
@@ -202,12 +204,12 @@ class TqGateway(BaseGateway):
             self.subscribe(list(self.hist_subs))
 
             # 订阅kline
-            for (symbol,interval) in self.kline_subs:
-                self.subscribe_bars(symbol,interval)
+            for symbol, interval in self.kline_subs:
+                self.subscribe_bars(symbol, interval)
         except Exception as e:
             logger.exception(f"TqSdk连接失败: {e}")
             self.connected = False
-            return False
+            return  # type: ignore[return-value]
 
         """主循环运行"""
         logger.info("Tq主循环已启动")
@@ -240,7 +242,9 @@ class TqGateway(BaseGateway):
 
             # 格式化合约代码
             std_symbols = [self._format_symbol(sym) for sym in self.hist_subs]
-            subscribe_symbols = [symbol for symbol in std_symbols if symbol and symbol not in self._quotes]
+            subscribe_symbols = [
+                symbol for symbol in std_symbols if symbol and symbol not in self._quotes
+            ]
             if len(subscribe_symbols) == 0:
                 return True
             if self.api is None:
@@ -257,17 +261,22 @@ class TqGateway(BaseGateway):
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """订阅K线数据"""
-        if (symbol,interval) not in self.kline_subs:
-                self.kline_subs.append((symbol,interval))
+        if (symbol, interval) not in self.kline_subs:
+            self.kline_subs.append((symbol, interval))
 
-        if not self.connected:        
+        if not self.connected:
             return False
 
         seconds = self._interval_to_seconds(interval)
-        data_length = 3600*24//seconds
-        kline = self.api.get_kline_serial( symbol=self._format_symbol(symbol),duration_seconds=seconds,data_length=data_length)
-        self._klines[(symbol,interval)] = kline
+        data_length = 3600 * 24 // seconds
+        if self.api is None:
+            return False
+        kline = self.api.get_kline_serial(  # type: ignore[union-attr]
+            symbol=self._format_symbol(symbol), duration_seconds=seconds, data_length=data_length
+        )
+        self._klines[(symbol, interval)] = kline  # type: ignore[assignment, index]
         logger.info(f"订阅K线数据: {symbol} {interval}")
+        return True
 
     def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """下单"""
@@ -373,10 +382,7 @@ class TqGateway(BaseGateway):
     def get_account(self) -> Optional[AccountData]:
         """获取账户数据(兼容)"""
         if self._account is None:
-            return AccountData(
-                account_id=self.account_id,
-                balance=0
-            )
+            return AccountData.model_construct(account_id=self.account_id or "", balance=0)
         return self._convert_account(self._account)
 
     def get_positions(self) -> Dict[str, PositionData]:
@@ -404,14 +410,15 @@ class TqGateway(BaseGateway):
                 logger.error("TqSdk未连接")
                 return None
 
-            kline = self._klines.get((symbol, interval)).copy()
-            kline['datetime'] = kline['datetime'].apply(lambda x: datetime.fromtimestamp(x/1e9))
+            kline_data = self._klines.get((symbol, interval))  # type: ignore[call-overload]
+            if kline_data is None:
+                return None
+            kline = kline_data.copy()
+            kline["datetime"] = kline["datetime"].apply(lambda x: datetime.fromtimestamp(x / 1e9))
             return kline
         except Exception as e:
             logger.exception(f"获取K线数据失败: {e}")
             raise e
-
-
 
     def _wait_update(self, timeout: int = 3) -> bool:
         """
@@ -434,12 +441,11 @@ class TqGateway(BaseGateway):
                     # 检查报单变动
                     if self.api.is_changing(order):
                         self._emit_order(self._convert_order(order))
-                        if order.status == 'FINISHED':
+                        if order.status == "FINISHED":
                             to_delete.append(order.order_id)
                 # 移除已完成交挂单
                 for order_id in to_delete:
                     self._pending_orders.pop(order_id, None)
-
 
                 if self.api.is_changing(self._trades):
                     # 检查成交变动
@@ -447,27 +453,30 @@ class TqGateway(BaseGateway):
                         if self.api.is_changing(trade):
                             self._emit_trade(self._convert_trade(trade))
 
-                             
                 if self.api.is_changing(self._positions):
                     # 检查持仓变动
                     for position in self._positions.values():
-                        if self.api.is_changing(position,["pos_long","pos_short"]):
+                        if self.api.is_changing(position, ["pos_long", "pos_short"]):
                             self._emit_position(self._convert_position(position))
-                
+
                 if self.api.is_changing(self._account):
                     # 检查账户变动
                     self._emit_account(self._convert_account(self._account))
-                
+
                 for quote in self._quotes.values():
                     # 检查行情变动
-                    if self.api.is_changing(quote):
+                    if self.api.is_changing(quote):  # type: ignore[arg-type]
                         self._emit_tick(self._convert_tick(quote))
-                
-                for (symbol,interval),kline in self._klines.items():
-                    # 检查K线变动
-                    if self.api.is_changing(kline.iloc[-1], "datetime"):
-                        self._emit_bar(self._convert_bar(symbol,interval,kline.iloc[-1]))
 
+                for key, kline in self._klines.items():
+                    # 检查K线变动
+                    symbol, interval = key[0], key[1]  # type: ignore[assignment]
+                    if self.api.is_changing(kline.iloc[-1], "datetime"):  # type: ignore[arg-type]
+                        self._emit_bar(
+                            self._convert_bar(
+                                symbol, interval, kline.iloc[-2], kline.iloc[-1]["datetime"]  # type: ignore[index]
+                            )
+                        )
 
             return has_data  # type: ignore[no-any-return]
         except Exception as e:
@@ -487,7 +496,7 @@ class TqGateway(BaseGateway):
     def _convert_account(self, account: Account) -> AccountData:
         """转换账户数据"""
         return AccountData(
-            account_id=self.account_id,
+            account_id=self.account_id or "",
             balance=account.balance,
             available=account.available,
             margin=account.margin or 0,
@@ -500,6 +509,8 @@ class TqGateway(BaseGateway):
             float_profit=account.position_profit or 0,
             broker_name="TqSdk",
             currency="CNY",
+            user_id="",
+            status=None,
         )
 
     def _convert_position(self, pos: Position) -> PositionData:
@@ -527,8 +538,30 @@ class TqGateway(BaseGateway):
 
     def _convert_order(self, order: Order) -> OrderData:
         """转换订单数据"""
+        # 判断订单状态
+        error_msg = [
+            "拒绝",
+            "取消",
+            "不足",
+            "暂停",
+            "禁止",
+            "错误",
+            "闭市",
+            "未连接",
+            "最小单位",
+            "失败",
+            "不",
+            "超过",
+        ]
+        status_msg = order.get("last_msg", "")
+        status = OrderStatus.PENDING
+        if any(keyword in status_msg for keyword in error_msg):
+            status = OrderStatus.REJECTED
+        elif order.status == "FINISHED":
+            status = OrderStatus.FINISHED
+
         data = OrderData(
-            account_id=self.account_id,
+            account_id=self.account_id or "",
             order_id=order.get("order_id", ""),
             symbol=order.instrument_id,
             exchange=self._parse_exchange(order.exchange_id),
@@ -539,9 +572,8 @@ class TqGateway(BaseGateway):
             traded_price=float(order.get("price", 0)) or 0,
             price=order.get("limit_price"),
             price_type=OrderType.LIMIT if order.get("limit_price") else OrderType.MARKET,
-            # status=self._convert_status(order.get("status")),
-            status_msg=order.get("last_msg", ""),
-            status=order.status,
+            status=status,
+            status_msg=status_msg,
             gateway_order_id=order.get("exchange_order_id", ""),
             insert_time=(
                 datetime.fromtimestamp(order.get("insert_date_time", 0) / 1e9)
@@ -551,9 +583,6 @@ class TqGateway(BaseGateway):
             update_time=datetime.now(),
             trading_day=self.trading_day,
         )
-        error_msg = ["拒绝","取消","不足","暂停","禁止","错误","闭市","未连接","最小单位","失败","不"]
-        if any(keyword in data.status_msg for keyword in error_msg):
-            data.status = "REJECTED"
         return data
 
     def _convert_trade(self, trade: Trade) -> TradeData:
@@ -563,7 +592,7 @@ class TqGateway(BaseGateway):
         instrument_id = trade.get("instrument_id", "")
 
         return TradeData(
-            account_id=self.account_id,
+            account_id=self.account_id or "",
             trade_id=trade.get("trade_id", ""),
             order_id=order_id,
             symbol=instrument_id,
@@ -610,20 +639,23 @@ class TqGateway(BaseGateway):
             limit_down=float(quote.get("lower_limit", 0)),
         )
 
-    def _convert_bar(self, symbol:str,interval:str,data) -> BarData:
+    def _convert_bar(self, symbol: str, interval: str, data, update: datetime) -> BarData:
         """转换K线数据"""
-        return BarData(
+        bar = BarData(
             symbol=symbol,
             interval=interval,
             datetime=datetime.fromtimestamp(data["datetime"] / 1e9),
-
             open_price=float(data["open"]),
             high_price=float(data["high"]),
             low_price=float(data["low"]),
             close_price=float(data["close"]),
             volume=float(data["volume"]),
-            update_time=datetime.now(),
+            turnover=float(data.get("turnover", 0)),
+            open_interest=float(data.get("open_interest", 0)),
+            update_time=update,
         )
+        logger.info(f"收到新Bar: {data}")
+        return bar
 
     # ==================== 辅助方法 ====================
 
@@ -641,12 +673,3 @@ class TqGateway(BaseGateway):
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""
         return exchange_map.get(exchange_code.upper(), Exchange.NONE)
-
-    def _convert_status(self, status: str) -> OrderStatus:
-        """转换订单状态"""
-        status_map = {
-            "ALIVE": OrderStatus.NOTTRADED,
-            "FINISHED": OrderStatus.ALLTRADED,
-            "CANCELED": OrderStatus.CANCELLED,
-        }
-        return status_map.get(status, OrderStatus.SUBMITTING)

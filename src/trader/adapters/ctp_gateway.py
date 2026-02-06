@@ -106,21 +106,21 @@ class CtpGateway(BaseGateway):
 
     # ==================== 数据转换占位 ====================
 
-    def _convert_direction(self, direction: str) -> str:
+    def _convert_direction(self, direction: str) -> Direction:
         """转换买卖方向"""
-        return direction
+        return Direction(direction)
 
-    def _convert_offset(self, offset: str) -> str:
+    def _convert_offset(self, offset: str) -> Offset:
         """转换开平标志"""
-        return offset
+        return Offset(offset)
 
     def _convert_status(self, status: str) -> OrderStatus:
         """转换订单状态"""
         status_map = {
-            "0": OrderStatus.NOTTRADED,
-            "1": OrderStatus.PARTTRADED,
-            "2": OrderStatus.ALLTRADED,
-            "3": OrderStatus.CANCELLED,
+            "0": OrderStatus.PENDING,
+            "1": OrderStatus.PENDING,
+            "2": OrderStatus.FINISHED,
+            "3": OrderStatus.FINISHED,
             "4": OrderStatus.REJECTED,
         }
-        return status_map.get(status, OrderStatus.SUBMITTING)
+        return status_map.get(status, OrderStatus.PENDING)

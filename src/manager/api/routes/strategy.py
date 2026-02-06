@@ -7,16 +7,16 @@
 import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import (
+    StrategyBatchOpReq,
     StrategyConfig,
     StrategyRes,
-    StrategyUpdateReq,
-    StrategyBatchOpReq,
     StrategyStatusRes,
+    StrategyUpdateReq,
 )
 from src.manager.core.trading_manager import TradingManager
 from src.utils.logger import get_logger
@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/strategies", tags=["策略管理"])
 
 
 # ============ 辅助函数 ============
+
 
 def _handle_trader_not_found(account_id: str):
     """处理Trader未找到的情况"""
@@ -232,7 +233,9 @@ async def batch_operate_strategies(
                     await asyncio.sleep(0.5)
                     success = await trading_manager.start_strategy(account_id, strategy_id)
                 else:
-                    raise HTTPException(status_code=400, detail=f"不支持的操作类型: {request.operation}")
+                    raise HTTPException(
+                        status_code=400, detail=f"不支持的操作类型: {request.operation}"
+                    )
 
                 if success:
                     results["success"].append(strategy_id)
@@ -243,7 +246,7 @@ async def batch_operate_strategies(
 
         return success_response(
             data=results,
-            message=f"批量{request.operation}完成: 成功{len(results['success'])}个, 失败{len(results['failed'])}个"
+            message=f"批量{request.operation}完成: 成功{len(results['success'])}个, 失败{len(results['failed'])}个",
         )
     except HTTPException:
         raise
@@ -443,9 +446,7 @@ async def replay_all_strategies(
 
         # 通过socket发送回播请求到Trader进程
         response = await trader.send_request(
-            "replay_all_strategies",
-            {},
-            timeout=120.0  # 回播可能需要较长时间
+            "replay_all_strategies", {}, timeout=120.0  # 回播可能需要较长时间
         )
 
         if response is None:
@@ -453,11 +454,12 @@ async def replay_all_strategies(
 
         if isinstance(response, dict) and response.get("success"):
             return success_response(
-                message=f"回播完成",
-                data={"replayed_count": response.get("replayed_count", 0)}
+                message=f"回播完成", data={"replayed_count": response.get("replayed_count", 0)}
             )
         else:
-            error_msg = response.get("message", "回播失败") if isinstance(response, dict) else "回播失败"
+            error_msg = (
+                response.get("message", "回播失败") if isinstance(response, dict) else "回播失败"
+            )
             return error_response(message=error_msg)
 
     except HTTPException:

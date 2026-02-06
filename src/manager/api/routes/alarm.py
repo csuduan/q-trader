@@ -8,11 +8,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import AlarmRes
-from src.models.po import AlarmPo
 from src.manager.core.trading_manager import TradingManager
-from src.manager.api.dependencies import get_trading_manager
+from src.models.po import AlarmPo
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,7 +25,7 @@ async def get_today_alarms(
     status_filter: Optional[str] = Query(
         None, description="状态筛选: UNCONFIRMED未处理/CONFIRMED已处理，不传则返回全部"
     ),
-    trading_manager:TradingManager = Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取当日告警列表

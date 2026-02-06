@@ -6,26 +6,23 @@ Trader交易执行器
 import asyncio
 import signal
 from pathlib import Path
-from typing import Optional, Dict, Callable, Any
+from typing import Any, Callable, Dict, Optional
 
 from src.app_context import AppContext, get_app_context
-from src.trader.strategy import BaseStrategy
-from src.utils.config_loader import TraderConfig
 from src.job_mgr import JobManager
-from src.utils.scheduler import TaskScheduler
-from src.utils.ipc import SocketServer, request
 from src.trader.core.strategy_manager import StrategyManager
 from src.trader.core.trading_engine import TradingEngine
+from src.trader.strategy import BaseStrategy
 from src.trader.switch_mgr import SwitchPosManager
 from src.utils.async_event_engine import AsyncEventEngine
+from src.utils.config_loader import TraderConfig
 from src.utils.event_engine import EventTypes
+from src.utils.ipc import SocketServer, request
 from src.utils.logger import get_logger
+from src.utils.scheduler import TaskScheduler
 
 logger = get_logger(__name__)
 ctx = get_app_context()
-
-
-
 
 
 class Trader:
@@ -146,9 +143,10 @@ class Trader:
         检查数据库文件是否存在，不存在则创建并初始化
         """
         from pathlib import Path
-        from src.utils.database import init_database, get_database
+
         from src.models.po import SystemParamPo
         from src.utils.config_loader import RiskControlConfig
+        from src.utils.database import get_database, init_database
 
         # 构建数据库文件路径
         db_file = self.account_config.paths.database
@@ -321,7 +319,6 @@ class Trader:
         event_engine.register(EventTypes.TICK_UPDATE, self._on_tick_update)
         logger.info(f"Trader [{self.account_id}] 事件处理器已注册")
 
-
     async def stop(self) -> None:
         """停止Trader"""
         self._running = False
@@ -355,7 +352,7 @@ class Trader:
                 logger.info(f"已清理Socket文件: {socket_path}")
             except Exception as e:
                 logger.warning(f"清理PID/Socket文件失败: {e}")
-                
+
         logger.info(f"Trader [{self.account_id}] 已停止")
 
     # ========== Socket请求处理方法 ==========
@@ -560,7 +557,7 @@ class Trader:
 
         try:
             status_filter = data.get("status")
-            cmds =  self.trading_engine._order_cmd_executor.get_hist_cmds()
+            cmds = self.trading_engine._order_cmd_executor.get_hist_cmds()
             if status_filter == "active":
                 cmds = [cmd for cmd in cmds.values() if cmd.is_active]
             elif status_filter == "finished":
@@ -568,8 +565,8 @@ class Trader:
             return [cmd.to_dict() for cmd in cmds]
         except Exception as e:
             logger.exception(f"Trader [{self.account_id}] 获取报单指令状态失败: {e}")
-            return None  
-    
+            return None
+
     @request("get_jobs")
     async def _req_get_jobs(self, data: dict) -> list:
         """处理获取所有任务请求"""
@@ -665,7 +662,11 @@ class Trader:
         try:
             result = await self.strategy_manager.replay_all_strategies()
             if result.get("success"):
-                return {"success": True, "message": "回播完成", "replayed_count": result.get("replayed_count", 0)}
+                return {
+                    "success": True,
+                    "message": "回播完成",
+                    "replayed_count": result.get("replayed_count", 0),
+                }
             else:
                 return {"success": False, "message": result.get("message", "回播失败")}
         except Exception as e:
@@ -884,7 +885,7 @@ class Trader:
             logger.exception(f"Trader [{self.account_id}] 获取策略报单指令失败: {e}")
             return []
 
-    def _build_strategy_config(self, strategy:BaseStrategy) -> dict:
+    def _build_strategy_config(self, strategy: BaseStrategy) -> dict:
         """构建策略配置对象"""
         from src.manager.api.schemas import StrategyConfig
 
@@ -921,8 +922,8 @@ class Trader:
     @request("get_rotation_instructions")
     async def _req_get_rotation_instructions(self, data: dict) -> dict:
         """处理获取换仓指令列表请求"""
-        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
         limit = data.get("limit", 100)
@@ -997,8 +998,8 @@ class Trader:
     @request("get_rotation_instruction")
     async def _req_get_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理获取指定换仓指令请求"""
-        from src.utils.database import get_database
         from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
         instruction_id = data.get("instruction_id")
@@ -1053,9 +1054,10 @@ class Trader:
     @request("create_rotation_instruction")
     async def _req_create_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理创建换仓指令请求"""
-        from src.utils.database import get_database
-        from src.models.po import RotationInstructionPo
         from datetime import datetime
+
+        from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
 
@@ -1109,15 +1111,18 @@ class Trader:
                 "trading_date": instruction.trading_date,
                 "enabled": instruction.enabled,
                 "status": instruction.status,
-                "created_at": instruction.created_at.isoformat() if instruction.created_at else None,
+                "created_at": (
+                    instruction.created_at.isoformat() if instruction.created_at else None
+                ),
             }
 
     @request("update_rotation_instruction")
     async def _req_update_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理更新换仓指令请求"""
-        from src.utils.database import get_database
-        from src.models.po import RotationInstructionPo
         from datetime import datetime
+
+        from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
         instruction_id = data.get("instruction_id")
@@ -1160,16 +1165,21 @@ class Trader:
                 "trading_date": instruction.trading_date,
                 "enabled": instruction.enabled,
                 "status": instruction.status,
-                "created_at": instruction.created_at.isoformat() if instruction.created_at else None,
-                "updated_at": instruction.updated_at.isoformat() if instruction.updated_at else None,
+                "created_at": (
+                    instruction.created_at.isoformat() if instruction.created_at else None
+                ),
+                "updated_at": (
+                    instruction.updated_at.isoformat() if instruction.updated_at else None
+                ),
             }
 
     @request("delete_rotation_instruction")
     async def _req_delete_rotation_instruction(self, data: dict) -> bool:
         """处理删除换仓指令请求"""
-        from src.utils.database import get_database
-        from src.models.po import RotationInstructionPo
         from datetime import datetime
+
+        from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
         instruction_id = data.get("instruction_id")
@@ -1195,9 +1205,10 @@ class Trader:
     @request("clear_rotation_instructions")
     async def _req_clear_rotation_instructions(self, data: dict) -> bool:
         """处理清除已完成换仓指令请求"""
-        from src.utils.database import get_database
-        from src.models.po import RotationInstructionPo
         from datetime import datetime
+
+        from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
 
@@ -1264,9 +1275,10 @@ class Trader:
     @request("batch_execute_instructions")
     async def _req_batch_execute_instructions(self, data: dict) -> dict:
         """处理批量执行换仓指令请求"""
-        from src.utils.database import get_database
-        from src.models.po import RotationInstructionPo
         from datetime import datetime
+
+        from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
         ids = data.get("ids", [])
@@ -1315,9 +1327,10 @@ class Trader:
     @request("batch_delete_instructions")
     async def _req_batch_delete_instructions(self, data: dict) -> dict:
         """处理批量删除换仓指令请求"""
-        from src.utils.database import get_database
-        from src.models.po import RotationInstructionPo
         from datetime import datetime
+
+        from src.models.po import RotationInstructionPo
+        from src.utils.database import get_database
 
         db = get_database()
         ids = data.get("ids", [])
@@ -1326,7 +1339,9 @@ class Trader:
             deleted_count = (
                 session.query(RotationInstructionPo)
                 .filter(RotationInstructionPo.id.in_(ids))
-                .update({"is_deleted": True, "updated_at": datetime.now()}, synchronize_session=False)
+                .update(
+                    {"is_deleted": True, "updated_at": datetime.now()}, synchronize_session=False
+                )
             )
 
             session.commit()
@@ -1338,8 +1353,8 @@ class Trader:
     @request("list_system_params")
     async def _req_list_system_params(self, data: dict) -> list:
         """处理获取系统参数列表请求"""
-        from src.utils.database import get_database
         from src.models.po import SystemParamPo
+        from src.utils.database import get_database
 
         db = get_database()
         group = data.get("group")
@@ -1369,8 +1384,8 @@ class Trader:
     @request("get_system_param")
     async def _req_get_system_param(self, data: dict) -> Optional[dict]:
         """处理获取单个系统参数请求"""
-        from src.utils.database import get_database
         from src.models.po import SystemParamPo
+        from src.utils.database import get_database
 
         db = get_database()
         param_key = data.get("param_key")
@@ -1396,9 +1411,10 @@ class Trader:
     @request("update_system_param")
     async def _req_update_system_param(self, data: dict) -> Optional[dict]:
         """处理更新系统参数请求"""
-        from src.utils.database import get_database
-        from src.models.po import SystemParamPo
         from datetime import datetime
+
+        from src.models.po import SystemParamPo
+        from src.utils.database import get_database
 
         db = get_database()
         param_key = data.get("param_key")
@@ -1434,8 +1450,8 @@ class Trader:
     @request("get_system_params_by_group")
     async def _req_get_system_params_by_group(self, data: dict) -> Optional[dict]:
         """处理根据分组获取系统参数请求"""
-        from src.utils.database import get_database
         from src.models.po import SystemParamPo
+        from src.utils.database import get_database
 
         db = get_database()
         group = data.get("group")
@@ -1451,6 +1467,7 @@ class Trader:
         """处理暂停交易请求"""
         self.trading_engine.paused = True
         return True
+
     @request("resume_trading")
     async def _req_resume_trading(self, data: dict) -> dict:
         """处理恢复交易请求"""

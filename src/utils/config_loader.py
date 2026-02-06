@@ -133,22 +133,7 @@ class StrategyConfig(BaseModel):
         extra = "allow"  # 允许额外字段
 
 
-class StrategyConfig(BaseModel):
-    """策略配置集合"""
-    enabled: bool = False
-    type: str = "rsi_strategy"
-    symbol: str = ""
-    exchange: str = ""
-    volume: int = 1
-    bar: str = "M1"
-    params_file: Optional[str] = None
-    params: Dict[str, Any] = Field(default_factory=dict)
-    class Config:
-        extra = "allow"  # 允许额外字段
-
-
 # ==================== 账户配置类 ====================
-
 
 
 class GatewayConfig(BaseModel):
@@ -200,6 +185,7 @@ class ApiConfig(BaseModel):
 
 class AppConfig(BaseModel):
     """全局配置（来自config.yaml）"""
+
     account_ids: List[str] = Field(default_factory=list, description="账户ID列表")
     accounts: List[AccountConfig] = Field(default_factory=list, description="账户配置列表")
     paths: PathsConfig = Field(default_factory=PathsConfig)
@@ -258,11 +244,11 @@ class ConfigLoader:
             try:
                 # 从文件名提取account_id
                 account_id = account_file.stem.replace("account-", "")
-                
+
                 # 避免重复加载
                 if account_id in loaded_account_ids:
                     continue
-                
+
                 try:
                     account = self._load_account_config(account_id)
                     self.app_config.accounts.append(account)
@@ -279,7 +265,7 @@ class ConfigLoader:
             # 按照account_ids中定义的顺序重新排序
             account_order = {aid: i for i, aid in enumerate(self.app_config.account_ids)}
             self.app_config.accounts.sort(
-                key=lambda acc: account_order.get(acc.account_id, float('inf'))
+                key=lambda acc: account_order.get(acc.account_id, float("inf")) if acc.account_id is not None else float("inf")
             )
 
         return self.app_config

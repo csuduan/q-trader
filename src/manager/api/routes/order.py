@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, Query
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import ManualOrderReq, OrderRes
-from src.utils.logger import get_logger
 from src.manager.core.trading_manager import TradingManager
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -134,37 +134,37 @@ async def get_order_by_id(
                     break
 
     if order:
-            return success_response(
-                data=OrderRes(
-                    id=0,
-                    account_id=order.account_id,
-                    order_id=order.order_id,
-                    exchange_order_id=order.exchange_order_id or order.gateway_name or "",
-                    symbol=order.symbol,
-                    direction=(
-                        order.direction.value
-                        if hasattr(order.direction, "value")
-                        else str(order.direction)
-                    ),
-                    offset=(
-                        order.offset.value if hasattr(order.offset, "value") else str(order.offset)
-                    ),
-                    volume_orign=order.volume,
-                    volume_left=order.volume_left,
-                    limit_price=float(order.price) if order.price else None,
-                    price_type=(
-                        order.price_type.value
-                        if hasattr(order.price_type, "value")
-                        else str(order.price_type)
-                    ),
-                    status=order.status,
-                    insert_date_time=order.insert_time or datetime.now(),
-                    last_msg=order.status_msg or "",
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
+        return success_response(
+            data=OrderRes(
+                id=0,
+                account_id=order.account_id,
+                order_id=order.order_id,
+                exchange_order_id=order.exchange_order_id or order.gateway_name or "",
+                symbol=order.symbol,
+                direction=(
+                    order.direction.value
+                    if hasattr(order.direction, "value")
+                    else str(order.direction)
                 ),
-                message="获取成功",
-            )
+                offset=(
+                    order.offset.value if hasattr(order.offset, "value") else str(order.offset)
+                ),
+                volume_orign=order.volume,
+                volume_left=order.volume_left,
+                limit_price=float(order.price) if order.price else None,
+                price_type=(
+                    order.price_type.value
+                    if hasattr(order.price_type, "value")
+                    else str(order.price_type)
+                ),
+                status=order.status,
+                insert_date_time=order.insert_time or datetime.now(),
+                last_msg=order.status_msg or "",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            ),
+            message="获取成功",
+        )
 
     return error_response(code=404, message="委托单不存在")
 

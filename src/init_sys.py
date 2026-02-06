@@ -10,9 +10,9 @@ from typing import Optional
 import yaml
 from sqlalchemy.orm import Session
 
-from src.utils.database import Database, get_database
 from src.models.po import JobPo, SystemParamPo
 from src.utils.config_loader import PathsConfig, get_config_loader
+from src.utils.database import Database, get_database
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

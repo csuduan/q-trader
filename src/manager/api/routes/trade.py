@@ -10,11 +10,9 @@ from fastapi import APIRouter, Depends, Query
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import TradeRes
+from src.manager.core.trading_manager import TradingManager
 from src.models.object import TradeData
 from src.utils.logger import get_logger
-from src.manager.core.trading_manager import TradingManager
-
-
 
 logger = get_logger(__name__)
 
@@ -25,7 +23,7 @@ router = APIRouter(prefix="/api/trade", tags=["成交"])
 async def get_trades(
     account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
     date: Optional[str] = Query(None, description="查询日期（YYYY-MM-DD格式），默认为今日"),
-    trading_manager:TradingManager=Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取成交记录
@@ -37,9 +35,9 @@ async def get_trades(
     - account_id: 可选，指定账户ID筛选（多账号模式）
     """
 
-    try:        
+    try:
         # 从内存查询（使用 TradingManager）
-        trades_list:List[TradeData] = await trading_manager.get_trades(account_id=account_id)
+        trades_list: List[TradeData] = await trading_manager.get_trades(account_id=account_id)
         return success_response(
             data=[
                 TradeRes(
@@ -54,9 +52,7 @@ async def get_trades(
                         else str(trade.direction)
                     ),
                     offset=(
-                        trade.offset.value
-                        if hasattr(trade.offset, "value")
-                        else str(trade.offset)
+                        trade.offset.value if hasattr(trade.offset, "value") else str(trade.offset)
                     ),
                     price=float(trade.price),
                     volume=trade.volume,
@@ -70,7 +66,6 @@ async def get_trades(
     except Exception as e:
         logger.exception(f"获取成交记录失败: {e}", exc_info=True)
         return error_response(code=500, message=f"获取成交记录失败: {str(e)}")
-
 
 
 @router.get("/order/{order_id}")
@@ -103,9 +98,7 @@ async def get_trades_by_order(
                     else str(trade.direction)
                 ),
                 offset=(
-                    trade.offset.value
-                    if hasattr(trade.offset, "value")
-                    else str(trade.offset)
+                    trade.offset.value if hasattr(trade.offset, "value") else str(trade.offset)
                 ),
                 price=float(trade.price),
                 volume=trade.volume,

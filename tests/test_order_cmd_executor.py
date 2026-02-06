@@ -25,15 +25,7 @@ def test_executor_initialization():
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
 
-    assert executor.active_count == 0
-    assert executor.total_count == 0
     assert not executor._running
-
-    status = executor.get_status()
-    assert status["running"] is False
-    assert status["active_count"] == 0
-    assert status["total_count"] == 0
-    assert status["active_commands"] == []
 
     print("test_executor_initialization passed")
 
@@ -76,15 +68,13 @@ def test_executor_register_unregister():
 
     # 注册
     executor.register(cmd)
-    assert executor.total_count == 1
-    assert cmd.cmd_id in executor._order_cmds
+    assert cmd.cmd_id in executor._pending_cmds
     assert cmd.status == OrderCmdStatus.RUNNING
     assert cmd.started_at is not None
 
     # 注销
     executor.unregister(cmd.cmd_id)
-    assert executor.total_count == 0
-    assert cmd.cmd_id not in executor._order_cmds
+    assert cmd.cmd_id not in executor._pending_cmds
 
     print("test_executor_register_unregister passed")
 
@@ -117,16 +107,16 @@ def test_executor_close():
         traded=0,
         price=Decimal("3500"),
         account_id="test-account",
-        status=OrderStatus.NOTTRADED.value,
+        status=OrderStatus.PENDING,
     )
-    cmd._active_orders["order-1"] = order
+    cmd.add_order(order)
 
     # 关闭命令
     result = executor.close(cmd.cmd_id)
 
     assert result is True
     assert cmd.status == OrderCmdStatus.FINISHED
-    assert cmd.finish_reason.value == "CANCELLED"
+    assert cmd.finish_reason == "指令已取消"
     mock_trading_engine.cancel_order.assert_called_once_with("order-1")
 
     print("test_executor_close passed")
@@ -134,8 +124,23 @@ def test_executor_close():
 
 def test_executor_status():
     """测试获取执行器状态"""
+    from src.models.object import PositionData, Exchange
+
     mock_event_engine = MagicMock(spec=EventEngine)
     mock_trading_engine = MagicMock()
+
+    # 为平仓指令提供持仓数据
+    mock_position = PositionData(
+        symbol="SHFE.rb2505",
+        exchange=Exchange.SHFE,
+        account_id="test-account",
+        pos=50,
+        pos_long=50,
+        pos_short=0,
+        pos_long_yd=30,
+        pos_long_td=20,
+    )
+    mock_trading_engine.get_position.return_value = mock_position
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
 
@@ -163,18 +168,9 @@ def test_executor_status():
     executor.register(cmd1)
     executor.register(cmd2)
 
-    status = executor.get_status()
-
-    assert status["active_count"] == 2
-    assert status["total_count"] == 2
-    assert len(status["active_commands"]) == 2
-
-    # 验证命令信息
-    cmd1_info = next((c for c in status["active_commands"] if c["cmd_id"] == cmd1.cmd_id), None)
-    assert cmd1_info is not None
-    assert cmd1_info["symbol"] == "SHFE.rb2505"
-    assert cmd1_info["filled_volume"] == 50
-    assert cmd1_info["volume"] == 100
+    # 检查活跃命令数量
+    assert len(executor._pending_cmds) == 2
+    assert len(executor.get_active_cmds()) == 2
 
     print("test_executor_status passed")
 
@@ -206,13 +202,13 @@ def test_executor_on_order_update():
         traded=0,
         price=Decimal("3500"),
         account_id="test-account",
-        status=OrderStatus.NOTTRADED.value,
+        status=OrderStatus.PENDING,
     )
 
     executor._on_order_update(order)
 
-    # 验证订单被添加到活动订单
-    assert "order-1" in cmd._active_orders
+    # 由于 _pending_order 是 None，订单不会被匹配
+    assert cmd._pending_order is None
 
     print("test_executor_on_order_update passed")
 
@@ -248,17 +244,18 @@ def test_executor_on_trade_update():
 
     executor._on_trade_update(trade)
 
-    # 验证成交数量更新
-    assert cmd.filled_volume == 10
+    # 成交统计通过订单更新处理，不是通过成交更新
+    # 所以 filled_volume 应该仍然是 0
+    assert cmd.filled_volume == 0
 
     print("test_executor_on_trade_update passed")
 
 
-def test_executor_process_cmd_tick_with_order_request():
-    """测试处理命令 tick 时下单"""
+def test_executor_process_cmd_trig_with_order_request():
+    """测试处理命令 trig 时下单"""
     mock_event_engine = MagicMock(spec=EventEngine)
     mock_trading_engine = MagicMock()
-    mock_trading_engine.insert_order.return_value = "order-123"
+    mock_trading_engine.insert_order.return_value = MagicMock(order_id="order-123")
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
 
@@ -273,18 +270,19 @@ def test_executor_process_cmd_tick_with_order_request():
     )
     executor.register(cmd)
 
-    now = time.time()
-    executor._process_cmd_tick(cmd, now)
+    executor._process_cmd(cmd)
 
     # 验证下单被调用
     mock_trading_engine.insert_order.assert_called_once()
     assert "order-123" in cmd.all_order_ids
 
-    print("test_executor_process_cmd_tick_with_order_request passed")
+    print("test_executor_process_cmd_trig_with_order_request passed")
 
 
-def test_executor_process_cmd_tick_with_timeout_orders():
+def test_executor_process_cmd_trig_with_timeout_orders():
     """测试处理超时订单"""
+    from datetime import datetime, timedelta
+
     mock_event_engine = MagicMock(spec=EventEngine)
     mock_trading_engine = MagicMock()
     mock_trading_engine.cancel_order.return_value = True
@@ -298,14 +296,10 @@ def test_executor_process_cmd_tick_with_timeout_orders():
         volume=100,
         price=3500.0,
         order_timeout=1.0,
-        max_retries=3,
     )
     executor.register(cmd)
 
     # 添加一个超时订单
-    cmd.on_order_submitted("order-timeout", 10)
-    cmd._active_order_info["order-timeout"].submit_time = time.time() - 2.0
-
     order = OrderData(
         order_id="order-timeout",
         symbol="SHFE.rb2505",
@@ -315,17 +309,45 @@ def test_executor_process_cmd_tick_with_timeout_orders():
         traded=0,
         price=Decimal("3500"),
         account_id="test-account",
-        status=OrderStatus.NOTTRADED.value,
+        status=OrderStatus.PENDING,
+        insert_time=datetime.now() - timedelta(seconds=2),
     )
-    cmd._active_orders["order-timeout"] = order
+    cmd.add_order(order)
 
-    now = time.time()
-    executor._process_cmd_tick(cmd, now)
+    executor._process_cmd(cmd)
 
     # 验证撤单被调用
     mock_trading_engine.cancel_order.assert_called_once_with("order-timeout")
 
-    print("test_executor_process_cmd_tick_with_timeout_orders passed")
+    print("test_executor_process_cmd_trig_with_timeout_orders passed")
+
+
+def test_executor_pass_position_to_cmd():
+    """测试执行器传递持仓给命令"""
+    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_trading_engine = MagicMock()
+    mock_trading_engine.insert_order.return_value = MagicMock(order_id="order-123")
+    mock_trading_engine.positions.get.return_value = MagicMock(pos_long=100)
+
+    executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
+
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+        price=3500.0,
+        max_volume_per_order=10,
+        order_interval=0.1,
+    )
+    executor.register(cmd)
+
+    executor._process_cmd(cmd)
+
+    # 验证持仓查询被调用
+    mock_trading_engine.positions.get.assert_called_once_with("SHFE.rb2505")
+
+    print("test_executor_pass_position_to_cmd passed")
 
 
 if __name__ == "__main__":
@@ -336,6 +358,7 @@ if __name__ == "__main__":
     test_executor_status()
     test_executor_on_order_update()
     test_executor_on_trade_update()
-    test_executor_process_cmd_tick_with_order_request()
-    test_executor_process_cmd_tick_with_timeout_orders()
+    test_executor_process_cmd_trig_with_order_request()
+    test_executor_process_cmd_trig_with_timeout_orders()
+    test_executor_pass_position_to_cmd()
     print("\nAll executor tests passed!")

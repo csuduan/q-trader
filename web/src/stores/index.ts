@@ -65,14 +65,31 @@ export const useStore = defineStore('main', () => {
 
   // 当前账户的成交
   const currentTrades = computed(() => {
-    if (!selectedAccountId.value) return trades.value
-    return trades.value.filter(trade => trade.account_id === selectedAccountId.value)
+    let filtered = trades.value
+    if (selectedAccountId.value) {
+      filtered = trades.value.filter(trade => trade.account_id === selectedAccountId.value)
+    }
+    // 按成交时间倒序排列（最新的在前面）
+    return [...filtered].sort((a, b) => b.trade_date_time - a.trade_date_time)
   })
 
   // 当前账户的订单
   const currentOrders = computed(() => {
-    if (!selectedAccountId.value) return orders.value
-    return orders.value.filter(order => order.account_id === selectedAccountId.value)
+    let filtered = orders.value
+    if (selectedAccountId.value) {
+      filtered = orders.value.filter(order => order.account_id === selectedAccountId.value)
+    }
+    // 按报单时间倒序排列（最新的在前面）
+    // insert_date_time 可能是 number（时间戳）或 string（ISO 格式）
+    return [...filtered].sort((a, b) => {
+      const timeA = typeof a.insert_date_time === 'number'
+        ? a.insert_date_time
+        : new Date(a.insert_date_time).getTime()
+      const timeB = typeof b.insert_date_time === 'number'
+        ? b.insert_date_time
+        : new Date(b.insert_date_time).getTime()
+      return timeB - timeA
+    })
   })
 
   // 账户汇总信息

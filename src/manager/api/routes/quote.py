@@ -8,10 +8,8 @@ from fastapi import APIRouter, Depends
 
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
-from src.utils.logger import get_logger
 from src.manager.core.trading_manager import TradingManager
-
-
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -21,7 +19,7 @@ router = APIRouter(prefix="/api/quote", tags=["行情"])
 @router.get("")
 async def get_subscribed_quotes(
     account_id: str = None,
-    trading_manager:TradingManager=Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取所有已订阅的行情列表
@@ -57,7 +55,7 @@ async def get_subscribed_quotes(
 @router.post("/subscribe")
 async def subscribe_symbol(
     request: dict,
-    trading_manager:TradingManager=Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     订阅合约行情
@@ -83,4 +81,6 @@ async def subscribe_symbol(
     if not success:
         return error_response(code=500, message=f"订阅 {symbol} 失败")
 
-    return success_response(data={"account_id": account_id, "symbol": symbol}, message=f"已订阅 {symbol}")
+    return success_response(
+        data={"account_id": account_id, "symbol": symbol}, message=f"已订阅 {symbol}"
+    )

@@ -4,7 +4,7 @@ API数据模型定义
 """
 
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,9 +25,9 @@ class AccountRes(BaseModel):
     updated_at: datetime
     user_id: Optional[str] = None
     risk_status: dict = {}
-    status: Optional[str] = None  #Trader状态: stopped, connecting, connected
-    trade_paused: bool = False  #是否暂停交易
-    gateway_connected: bool = False  #网关是否已连接
+    status: Optional[str] = None  # Trader状态: stopped, connecting, connected
+    trade_paused: bool = False  # 是否暂停交易
+    gateway_connected: bool = False  # 网关是否已连接
 
     class Config:
         from_attributes = True
@@ -116,6 +116,7 @@ class QuoteRes(BaseModel):
 
 class ManualOrderReq(BaseModel):
     """手动报单请求"""
+
     account_id: str = Field(..., description="账户ID")
     symbol: str = Field(..., description="合约代码，如 SHFE.rb2505")
     direction: str = Field(..., description="买卖方向: BUY/SELL")
@@ -210,6 +211,7 @@ class StrategyRes(BaseModel):
     trading_status: str | None = None
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)
+
 
 class StrategyConfig(BaseModel):
     """策略配置"""

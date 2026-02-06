@@ -11,11 +11,10 @@ from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import SystemStatusRes
 from src.manager.api.websocket_manager import websocket_manager
+from src.manager.core.trading_manager import TradingManager
 from src.models.object import AccountData
 from src.models.po import JobPo
 from src.utils.logger import get_logger
-from src.manager.core.trading_manager import TradingManager
-
 
 logger = get_logger(__name__)
 
@@ -38,12 +37,7 @@ async def get_system_status(
     if not trader:
         # trader未初始化（可能是禁用账户），返回默认状态
         return success_response(
-            data={
-                "account_id": account_id,
-                "paused": False,
-                "running": False
-            },
-            message="获取成功"
+            data={"account_id": account_id, "paused": False, "running": False}, message="获取成功"
         )
 
     engine_status = trader.get_status()
@@ -53,7 +47,7 @@ async def get_system_status(
 @router.get("/risk-control")
 async def get_risk_control_status(
     account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
-    trading_manager:TradingManager=Depends(get_trading_manager),
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取风控状态
@@ -61,7 +55,7 @@ async def get_risk_control_status(
     返回风控模块的当前状态和配置
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    account:AccountData = await trading_manager.get_account(account_id) 
+    account: AccountData = await trading_manager.get_account(account_id)
     return success_response(data=account.risk_status, message="获取成功")
 
 
@@ -276,9 +270,9 @@ async def get_trader_status(
                 "start_time": None,
                 "last_heartbeat": None,
                 "restart_count": 0,
-                "socket_path": None
+                "socket_path": None,
             },
-            message="获取成功"
+            message="获取成功",
         )
 
     status = trader.get_status()

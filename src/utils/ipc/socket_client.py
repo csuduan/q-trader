@@ -85,7 +85,7 @@ class SocketClient:
                 if register_msg and register_msg.get("type") == "register":
                     registered_account_id = register_msg.get("data", {}).get("account_id")
                     if registered_account_id == self.account_id:
-                        logger.info(f"[Trade Proxy-{self.account_id}] 连接注册成功")    
+                        logger.info(f"[Trade Proxy-{self.account_id}] 连接注册成功")
                         # 启动消息接收循环
                         self._receiving_task = asyncio.create_task(self._receiving_loop())
                         return True
@@ -287,12 +287,13 @@ class SocketClient:
             future = self._pending_requests.pop(request_id, None)
             if future and not future.done():
                 # data 可能为 None，需要处理
-                status = message.get("status")
-                message = message.get("message") or ""
+                status = message.get("status", "")
+                msg_text = message.get("message") or ""
                 if status == "error":
-                    future.set_exception(Exception(f"请求失败:{message}"))
+                    future.set_exception(Exception(f"请求失败:{msg_text}"))
                 else:
-                    future.set_result(message.get("data") or {})
+                    data = message.get("data")
+                    future.set_result(data if isinstance(data, dict) else {})
             return
         else:
             # 这是推送消息
@@ -381,8 +382,7 @@ class SocketClient:
             try:
                 # 尝试连接
                 success = await self.connect(
-                    retry_interval=self._reconnect_interval,
-                    max_retries=1  # 每次重连只尝试一次
+                    retry_interval=self._reconnect_interval, max_retries=1  # 每次重连只尝试一次
                 )
 
                 if success:
@@ -391,7 +391,9 @@ class SocketClient:
                     # 通知重连成功
                     self._connection_closed_by_server = False
                 else:
-                    logger.warning(f"[Manager-{self.account_id}] 重连失败，将在{self._reconnect_interval}秒后重试")
+                    logger.warning(
+                        f"[Manager-{self.account_id}] 重连失败，将在{self._reconnect_interval}秒后重试"
+                    )
                     await asyncio.sleep(self._reconnect_interval)
 
             except Exception as e:

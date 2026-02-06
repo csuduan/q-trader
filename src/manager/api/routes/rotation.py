@@ -99,7 +99,16 @@ async def get_rotation_instructions(
             account_id, limit=limit, offset=offset, status=status, enabled=enabled
         )
         if result is None:
-            return success_response(data={"instructions": [], "rotation_status": {"working": False, "is_manual": False}, "total": 0, "limit": limit, "offset": offset}, message="获取成功")
+            return success_response(
+                data={
+                    "instructions": [],
+                    "rotation_status": {"working": False, "is_manual": False},
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                },
+                message="获取成功",
+            )
         return success_response(data=result, message="获取成功")
     except Exception as e:
         logger.error(f"获取换仓指令列表失败: {e}")
@@ -164,7 +173,9 @@ async def update_rotation_instruction(
     """
     try:
         update_data = request.model_dump(exclude_unset=True)
-        result = await trading_manager.update_rotation_instruction(account_id, instruction_id, update_data)
+        result = await trading_manager.update_rotation_instruction(
+            account_id, instruction_id, update_data
+        )
         if result is None:
             return error_response(code=404, message="换仓指令不存在")
         return success_response(data=result, message="更新成功")
@@ -238,7 +249,9 @@ async def import_rotation_instructions(
     try:
         content = await file.read()
         csv_text = content.decode("gbk")
-        result = await trading_manager.import_rotation_instructions(account_id, csv_text, file.filename, mode)
+        result = await trading_manager.import_rotation_instructions(
+            account_id, csv_text, file.filename, mode
+        )
         if result is None:
             return error_response(message="导入失败")
         return success_response(data=result, message="导入完成")

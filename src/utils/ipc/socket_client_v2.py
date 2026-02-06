@@ -13,14 +13,16 @@ import inspect
 import uuid
 from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
-from src.utils.logger import get_logger
 from src.utils.ipc.protocol import (
-    MessageType, MessageBody, MessageProtocol,
-    create_request, create_response, create_heartbeat
+    MessageBody,
+    MessageProtocol,
+    MessageType,
+    create_heartbeat,
+    create_request,
+    create_response,
 )
-from src.utils.ipc.utils import (
-    BackoffStrategy, HealthChecker, generate_request_id
-)
+from src.utils.ipc.utils import BackoffStrategy, HealthChecker, generate_request_id
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -53,7 +55,7 @@ class SocketClient:
         reconnect_interval: float = 3.0,
         max_reconnect_attempts: int = 1000,  # 0表示无限重试
         heartbeat_interval: float = 15.0,  # 默认15秒心跳间隔
-        request_timeout: float = 10.0
+        request_timeout: float = 10.0,
     ):
         """
         初始化Socket客户端
@@ -87,18 +89,13 @@ class SocketClient:
         self._max_reconnect_attempts = max_reconnect_attempts
         self._reconnect_task: Optional[asyncio.Task] = None
         self._backoff = BackoffStrategy(
-            initial_delay=reconnect_interval,
-            max_delay=60.0,
-            multiplier=1.5
+            initial_delay=reconnect_interval, max_delay=60.0, multiplier=1.5
         )
 
         # 心跳相关
         self._heartbeat_interval = heartbeat_interval
         self._heartbeat_task: Optional[asyncio.Task] = None
-        self._health_checker = HealthChecker(
-            interval=heartbeat_interval,
-            timeout=5.0
-        )
+        self._health_checker = HealthChecker(interval=heartbeat_interval, timeout=5.0)
 
         # 推送处理器
         self._push_handlers: Dict[str, PushHandlerType] = {}
@@ -118,9 +115,11 @@ class SocketClient:
             async def handle_notification(data: dict):
                 print(f"Received: {data}")
         """
+
         def decorator(func: PushHandlerType) -> PushHandlerType:
             self._push_handlers[push_type] = func
             return func
+
         return decorator
 
     async def connect(self, retry_interval: float = 3.0, max_retries: int = 30) -> bool:
@@ -136,9 +135,7 @@ class SocketClient:
         """
         for i in range(max_retries):
             try:
-                self.reader, self.writer = await asyncio.open_unix_connection(
-                    self.socket_path
-                )
+                self.reader, self.writer = await asyncio.open_unix_connection(self.socket_path)
                 self.connected = True
                 self._backoff.reset()
 
@@ -150,7 +147,9 @@ class SocketClient:
                     self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
                 # 启动自动重连任务
-                if self._auto_reconnect and (self._reconnect_task is None or self._reconnect_task.done()):
+                if self._auto_reconnect and (
+                    self._reconnect_task is None or self._reconnect_task.done()
+                ):
                     self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
                 logger.info(f"SocketClient V2 已连接: {self.socket_path}")
@@ -169,8 +168,7 @@ class SocketClient:
 
             except FileNotFoundError:
                 logger.debug(
-                    f"Socket文件不存在，将在{retry_interval}秒后重试 "
-                    f"({i+1}/{max_retries})"
+                    f"Socket文件不存在，将在{retry_interval}秒后重试 " f"({i+1}/{max_retries})"
                 )
                 await asyncio.sleep(retry_interval)
             except Exception as e:
@@ -218,10 +216,7 @@ class SocketClient:
         logger.info(f"SocketClient V2 已断开")
 
     async def request(
-        self,
-        request_type: str,
-        data: Dict[str, Any],
-        timeout: Optional[float] = None
+        self, request_type: str, data: Dict[str, Any], timeout: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """
         发送请求并等待响应
@@ -245,8 +240,7 @@ class SocketClient:
         try:
             logger.info(f"开始请求: {request_type} {request_id}")
             message = create_request(
-                data={"type": request_type, "data": data},
-                request_id=request_id
+                data={"type": request_type, "data": data}, request_id=request_id
             )
 
             data_bytes = self.protocol.encode(message)
@@ -271,6 +265,9 @@ class SocketClient:
         """接收消息循环"""
         while self.connected:
             try:
+                if self.reader is None:
+                    logger.error("Reader is None, cannot receive messages")
+                    break
                 message = await self.protocol.read_message(self.reader)
                 if not message:
                     logger.info("服务器关闭了连接")
@@ -359,21 +356,18 @@ class SocketClient:
 
             # 检查是否达到最大重连次数
             if self._max_reconnect_attempts > 0 and attempt >= self._max_reconnect_attempts:
-                logger.error(
-                    f"重连失败，已达到最大重连次数 ({self._max_reconnect_attempts})"
-                )
+                logger.error(f"重连失败，已达到最大重连次数 ({self._max_reconnect_attempts})")
                 break
 
             attempt += 1
             delay = self._backoff.get_delay()
-            logger.info(f"尝试重新连接... ({attempt}/{self._max_reconnect_attempts if self._max_reconnect_attempts > 0 else '∞'}), 等待 {delay:.1f}s")
+            logger.info(
+                f"尝试重新连接... ({attempt}/{self._max_reconnect_attempts if self._max_reconnect_attempts > 0 else '∞'}), 等待 {delay:.1f}s"
+            )
             await asyncio.sleep(delay)
 
             try:
-                success = await self.connect(
-                    retry_interval=self._reconnect_interval,
-                    max_retries=1
-                )
+                success = await self.connect(retry_interval=self._reconnect_interval, max_retries=1)
 
                 if success:
                     logger.info("重连成功")
@@ -464,5 +458,5 @@ class SocketClient:
             "pending_requests": len(self._pending_requests),
             "auto_reconnect": self._auto_reconnect,
             "heartbeat_interval": self._heartbeat_interval,
-            "reconnect_attempts": self._max_reconnect_attempts
+            "reconnect_attempts": self._max_reconnect_attempts,
         }

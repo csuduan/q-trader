@@ -1,13 +1,13 @@
 """
-Socket服务器 
+Socket服务器
 """
 
 import asyncio
 import struct
+import uuid
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Set
-from functools import wraps
-import uuid
 
 import simplejson as json
 
@@ -44,8 +44,8 @@ def request(message_type: str) -> Callable:
                 raise
 
         # 保存元数据，供注册时使用
-        wrapper._message_type = message_type
-        wrapper._handler_func = func
+        wrapper._message_type = message_type  # type: ignore[attr-defined]
+        wrapper._handler_func = func  # type: ignore[attr-defined]
         return wrapper
 
     return decorator
@@ -58,7 +58,9 @@ class SocketClientConnection:
     封装单个客户端连接的读写流和状态。
     """
 
-    def __init__(self, conn_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, addr: Any):
+    def __init__(
+        self, conn_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, addr: Any
+    ):
         self.conn_id = conn_id
         self.reader = reader
         self.writer = writer
@@ -130,7 +132,7 @@ class SocketServer:
     #         @wraps(func)
     #         async def wrapper(*args, **kwargs):
     #             return await func(*args, **kwargs)
-            
+
     #         # 直接在这里注册，而不是通过 handlers.register
     #         self._req_handlers[request_type] = wrapper
     #         return wrapper
@@ -187,12 +189,11 @@ class SocketServer:
 
         # 启动健康检查任务
         # self._health_check_task = asyncio.create_task(self._health_check_loop())
-    
+
         logger.info(f"SocketServer 启动成功: {self.socket_path}")
         async with self.server:
             await self.server.serve_forever()
         logger.info(f"SocketServer 已停止: {self.socket_path}")
-
 
     async def stop(self) -> None:
         """停止Socket服务器"""
@@ -251,7 +252,9 @@ class SocketServer:
                 self._clients[conn_id] = conn
 
             # 发送注册确认消息
-            await self._send_message_to_connection(conn, "register", {"account_id": self.account_id})
+            await self._send_message_to_connection(
+                conn, "register", {"account_id": self.account_id}
+            )
 
             # 接收并处理消息
             while conn.is_connected():
@@ -260,13 +263,17 @@ class SocketServer:
                     if message:
                         await self._process_message(message, conn_id)
                 except asyncio.IncompleteReadError:
-                    logger.info(f"[Trader-{self.account_id}] 连接 {conn_id} 数据读取异常，客户端已断开")
+                    logger.info(
+                        f"[Trader-{self.account_id}] 连接 {conn_id} 数据读取异常，客户端已断开"
+                    )
                     break
                 except (ConnectionResetError, BrokenPipeError):
                     logger.info(f"[Trader-{self.account_id}] 连接 {conn_id} 被客户端重置")
                     break
                 except Exception as e:
-                    logger.exception(f"[Trader-{self.account_id}] 处理连接 {conn_id} 消息时出错: {e}")
+                    logger.exception(
+                        f"[Trader-{self.account_id}] 处理连接 {conn_id} 消息时出错: {e}"
+                    )
                     break
 
             logger.info(f"[Trader-{self.account_id}] 连接 {conn_id} 消息处理循环结束")
@@ -310,11 +317,15 @@ class SocketServer:
 
                 # 清理已断开的连接
                 for conn_id in dead_connections:
-                    logger.info(f"[Trader-{self.account_id}] 健康检查发现连接 {conn_id} 已断开，清理中...")
+                    logger.info(
+                        f"[Trader-{self.account_id}] 健康检查发现连接 {conn_id} 已断开，清理中..."
+                    )
                     await self._remove_client_connection(conn_id)
 
                 if dead_connections:
-                    logger.info(f"[Trader-{self.account_id}] 健康检查清理完成，移除 {len(dead_connections)} 个连接")
+                    logger.info(
+                        f"[Trader-{self.account_id}] 健康检查清理完成，移除 {len(dead_connections)} 个连接"
+                    )
 
             except asyncio.CancelledError:
                 logger.info(f"[Trader-{self.account_id}] 连接健康检查任务已取消")
@@ -324,7 +335,9 @@ class SocketServer:
 
         logger.info(f"[Trader-{self.account_id}] 连接健康检查任务已停止")
 
-    async def _receive_message_from_connection(self, conn: SocketClientConnection) -> Optional[Dict[str, Any]]:
+    async def _receive_message_from_connection(
+        self, conn: SocketClientConnection
+    ) -> Optional[Dict[str, Any]]:
         """
         从指定连接接收消息
 
@@ -361,10 +374,10 @@ class SocketServer:
         # 如果没有 request_id，这可能是推送消息或其他类型消息，不需要响应
         if request_id is None:
             logger.debug(f"[Trader-{self.account_id}] 收到无request_id的消息，忽略: {request_type}")
-            return {"status": "success"}
+            return {"status": "success"}  # type: ignore[return-value]
 
         try:
-            result = await self._handle_request(request_type, request_id, data)
+            result = await self._handle_request(request_type, request_id, data)  # type: ignore[arg-type]
         except ValueError as e:
             logger.warning(f"[Trader-{self.account_id}] 处理请求[{request_type}]出错: {e}")
             result = {"status": "error", "message": str(e)}
@@ -418,7 +431,9 @@ class SocketServer:
                 conn.connected = False
                 asyncio.create_task(self._remove_client_connection(conn_id))
 
-    async def _send_message_to_connection(self, conn: SocketClientConnection, message_type: str, data: Dict[str, Any]) -> bool:
+    async def _send_message_to_connection(
+        self, conn: SocketClientConnection, message_type: str, data: Dict[str, Any]
+    ) -> bool:
         """
         发送消息到指定连接
 
@@ -469,7 +484,9 @@ class SocketServer:
         message: Dict[str, Any] = json.loads(json_bytes.decode("utf-8"))
         return message
 
-    async def _handle_request(self, request_type: str, request_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_request(
+        self, request_type: str, request_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         处理请求消息（request-response模式）
         Args:

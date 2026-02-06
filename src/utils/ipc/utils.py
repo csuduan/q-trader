@@ -10,9 +10,9 @@ IPC工具模块
 import asyncio
 import hashlib
 import time
+import uuid
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
-import uuid
 
 from src.utils.logger import get_logger
 
@@ -37,15 +37,12 @@ class BackoffStrategy:
     """
 
     def __init__(
-        self,
-        initial_delay: float = 0.5,
-        max_delay: float = 15.0,
-        multiplier: float = 1.5
+        self, initial_delay: float = 0.5, max_delay: float = 15.0, multiplier: float = 1.5
     ):
         self.initial_delay = initial_delay
         self.max_delay = max_delay
         self.multiplier = multiplier
-        self._current_delay = initial_delay
+        self._current_delay: float = initial_delay
 
     def get_delay(self) -> float:
         """获取当前延迟时间并计算下一次延迟"""
@@ -72,7 +69,7 @@ class HealthChecker:
     def __init__(self, interval: float = 5.0, timeout: float = 3.0):
         self.interval = interval
         self.timeout = timeout
-        self._last_check = 0
+        self._last_check: float = 0.0
         self._healthy = True
 
     async def check(self, heartbeat_func: Callable[[], Any]) -> bool:
@@ -137,6 +134,7 @@ class RequestHandlerRegistry:
         Returns:
             装饰器函数
         """
+
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             async def wrapper(*args, **kwargs):
@@ -147,6 +145,7 @@ class RequestHandlerRegistry:
 
             self._handlers[request_type] = wrapper
             return wrapper
+
         return decorator
 
     def get_handler(self, request_type: str) -> Optional[Callable]:

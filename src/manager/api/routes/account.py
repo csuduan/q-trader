@@ -18,11 +18,11 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/account", tags=["账户"])
 
+
 @router.get("")
 async def get_account_info(
     account_id: Optional[str] = Query(None, description="账户ID，不传则返回第一个账户"),
-    trading_manager:TradingManager = Depends(get_trading_manager),
-
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取指定账户信息
@@ -31,14 +31,14 @@ async def get_account_info(
     """
     from datetime import datetime
 
-    try:     
+    try:
         # 从 TradingManager 获取账户数据
         ctx = get_app_context()
-        trading_manager:TradingManager = ctx.get_trading_manager()
+        trading_manager: TradingManager = ctx.get_trading_manager()
         account_data = await trading_manager.get_account(account_id)
         if not account_data:
             return error_response(code=404, message=f"账户 [{account_id}] 不存在")
-        
+
         return success_response(
             data=AccountRes(
                 account_id=account_id,
@@ -66,8 +66,8 @@ async def get_account_info(
 
 
 @router.get("/all")
-async def get_all_accounts(    
-    trading_manager:TradingManager = Depends(get_trading_manager),
+async def get_all_accounts(
+    trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
     获取所有账户信息（多账号模式）
@@ -78,7 +78,7 @@ async def get_all_accounts(
     try:
         # 从 TradingManager 获取所有账户数据
         ctx = get_app_context()
-        trading_manager:TradingManager = ctx.get_trading_manager()
+        trading_manager: TradingManager = ctx.get_trading_manager()
         accounts = await trading_manager.get_all_accounts()
         accounts_list = []
         for account_info in accounts:
@@ -205,7 +205,6 @@ async def connect_account_gateway(
 
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
-
 
     success = await trader.connect()
     if success:

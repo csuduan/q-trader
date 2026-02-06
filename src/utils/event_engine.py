@@ -129,6 +129,7 @@ class EventEngine:
             try:
                 # 尝试获取主事件循环
                 from src.app_context import get_app_context
+
                 ctx = get_app_context()
                 loop = ctx.get_event_loop()
                 if loop and loop.is_running():

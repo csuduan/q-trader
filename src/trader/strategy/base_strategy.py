@@ -6,6 +6,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from src.models.object import (
@@ -16,11 +17,11 @@ from src.models.object import (
     TradeData,
 )
 from src.trader.order_cmd import OrderCmd
-from src.utils.logger import get_logger
 from src.utils.config_loader import StrategyConfig
-import pandas as pd
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
+    from src.models.object import PositionData
     from src.trader.core.strategy_manager import StrategyManager
 
 logger = get_logger(__name__)
@@ -28,6 +29,7 @@ logger = get_logger(__name__)
 
 class BaseStrategyParams(BaseModel):
     """策略公共参数"""
+
     symbol: str = "IM2603"
     bar: str = "M1"
     volume_per_trade: int = 1
@@ -39,10 +41,10 @@ class BaseStrategyParams(BaseModel):
     overnight: bool = False
     force_exit_time: str = "14:55:00"
 
-    
 
 class BaseSignal(BaseModel):
     """策略信号基类"""
+
     side: int = 0  # 信号方向: 1多头, -1空头, 0无信号
     entry_price: float = 0.0  # 开仓价格
     entry_time: Optional[datetime] = None  # 开仓时间
@@ -53,6 +55,7 @@ class BaseSignal(BaseModel):
     # 真实入场信息
     entry_order_id: Optional[str] = None  # 开仓订单信息
     exit_order_id: Optional[str] = None  # 平仓订单信息
+    open_volume: int = 0  # 已开仓手数
     pos_volume: int = 0  # 持仓手数
     pos_price: Optional[float] = None  # 持仓均价
 
@@ -61,7 +64,7 @@ class BaseStrategy:
     """策略基类"""
 
     # 订阅bar列表（格式："symbol-interval"）
-    def __init__(self, strategy_id: str,strategy_config:StrategyConfig):
+    def __init__(self, strategy_id: str, strategy_config: StrategyConfig):
         self.strategy_id = strategy_id
         self.config: StrategyConfig = strategy_config
         self.inited: bool = False
@@ -77,7 +80,9 @@ class BaseStrategy:
         self.opening_paused: bool = False
         self.closing_paused: bool = False
 
-    def init(self,) -> bool:
+    def init(
+        self,
+    ) -> bool:
         """策略初始化"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
@@ -86,7 +91,7 @@ class BaseStrategy:
     def get_params(self) -> dict:
         """获取策略参数"""
         return self.params.model_dump() if self.params else {}
-    
+
     def get_signal(self) -> dict:
         """获取当前信号"""
         return self.signal.model_dump() if self.signal else {}
@@ -149,7 +154,7 @@ class BaseStrategy:
         """Bar行情回调"""
         pass
 
-    def on_cmd_update(self,order_cmd:OrderCmd):
+    def on_cmd_update(self, order_cmd: OrderCmd):
         """订单状态回调"""
         pass
 
@@ -160,17 +165,22 @@ class BaseStrategy:
     def on_trade(self, trade: TradeData):
         """成交回调"""
         pass
-    
 
     # ==================== 交易接口 ====================
-    def send_order_cmd(self,order_cmd:OrderCmd):
+    def send_order_cmd(self, order_cmd: OrderCmd):
         """发送报单指令"""
         order_cmd.source = f"策略-{self.strategy_id}"
-        self.strategy_manager.send_order_cmd(self.strategy_id,order_cmd)
-    
-    def cancel_order_cmd(self,order_cmd:OrderCmd):
+        if self.strategy_manager is None:
+            logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
+            return
+        self.strategy_manager.send_order_cmd(self.strategy_id, order_cmd)
+
+    def cancel_order_cmd(self, order_cmd: OrderCmd):
         """取消报单指令"""
-        self.strategy_manager.cancel_order_cmd(self.strategy_id,order_cmd)
+        if self.strategy_manager is None:
+            logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
+            return
+        self.strategy_manager.cancel_order_cmd(self.strategy_id, order_cmd)
 
     def pause_opening(self) -> None:
         """暂停开仓"""
@@ -201,3 +211,17 @@ class BaseStrategy:
         """禁用策略"""
         self.enabled = False
         logger.info(f"策略 [{self.strategy_id}] 已禁用")
+
+    def get_position(self, symbol: str) -> Optional["PositionData"]:
+        """
+        获取指定合约的持仓信息
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            PositionData: 持仓数据，如果不存在则返回None
+        """
+        if self.strategy_manager and self.strategy_manager.trading_engine:
+            return self.strategy_manager.get_position(symbol)
+        return None

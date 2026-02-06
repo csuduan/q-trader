@@ -12,8 +12,6 @@ from src.manager.api.schemas import OrderCmdRes
 from src.manager.core.trading_manager import TradingManager
 from src.utils.logger import get_logger
 
-
-
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/order-cmd", tags=["报单指令"])
@@ -34,7 +32,7 @@ async def get_order_cmds_status(
         if not account_id:
             return error_response(code=400, message="请提供账户ID")
 
-        result = await trading_manager.get_order_cmds_status(account_id,status)
+        result = await trading_manager.get_order_cmds_status(account_id, status)
 
         if not result:
             return success_response(data=[], message="获取成功")

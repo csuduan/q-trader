@@ -39,18 +39,17 @@ class Offset(str, Enum):
 
 class TraderState(str, Enum):
     """Trader Proxy 状态"""
-    STOPPED = "stopped"      # 已停止
+
+    STOPPED = "stopped"  # 已停止
     CONNECTING = "connecting"  # 连接中
-    CONNECTED = "connected"    # 已连接
+    CONNECTED = "connected"  # 已连接
+
 
 class OrderStatus(str, Enum):
     """订单状态"""
 
-    SUBMITTING = "SUBMITTING"
-    NOTTRADED = "NOTTRADED"
-    PARTTRADED = "PARTTRADED"
-    ALLTRADED = "ALLTRADED"
-    CANCELLED = "CANCELLED"
+    PENDING = "PENDING"
+    FINISHED = "FINISHED"
     REJECTED = "REJECTED"
 
 
@@ -93,6 +92,7 @@ class Exchange(str, Enum):
 
 class Interval(str, Enum):
     """K线周期"""
+
     TICK = "tick"
     MINUTE = "M1m"
     MINUTE_5 = "M5"
@@ -100,6 +100,7 @@ class Interval(str, Enum):
     MINUTE_30 = "M30"
     HOUR = "H1"
     DAILY = "D1"
+
 
 # ==================== 核心数据模型 ====================
 
@@ -176,15 +177,14 @@ class BarData(BaseModel):
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
 
-
     @property
     def std_symbol(self) -> str:
         return f"{self.symbol}"
-    
+
     @property
     def id(self) -> str:
         return f"{self.symbol}-{self.interval}"
-    
+
     def __str__(self) -> str:
         return f"{self.symbol}-{self.interval} {self.datetime} open:{self.open_price} high:{self.high_price} low:{self.low_price} close:{self.close_price} volume:{self.volume} update:{self.update_time}"
 
@@ -211,8 +211,7 @@ class OrderData(BaseModel):
     price: Optional[float] = Field(None, description="委托价格（None=市价单）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")
 
-    # status: OrderStatus = Field(default=OrderStatus.SUBMITTING, description="订单状态")
-    status: str = Field(default=OrderStatus.SUBMITTING.value, description="订单状态")
+    status: OrderStatus = Field(default=OrderStatus.PENDING, description="订单状态")
     status_msg: str = Field(default="", description="状态消息")
 
     # 账号标识（多账号支持）
@@ -235,11 +234,7 @@ class OrderData(BaseModel):
 
     def is_active(self) -> bool:
         """是否为活动订单"""
-        return self.status in [
-            OrderStatus.SUBMITTING,
-            OrderStatus.NOTTRADED,
-            OrderStatus.PARTTRADED,
-        ]
+        return self.status == OrderStatus.PENDING
 
 
 class TradeData(BaseModel):
@@ -342,15 +337,12 @@ class AccountData(BaseModel):
     broker_name: Optional[str] = Field(None, description="经纪商名称")
     currency: Optional[str] = Field(None, description="交易货币")
     user_id: Optional[str] = Field(None, description="用户ID")
-    trade_paused: bool = False  #是否暂停交易
-    gateway_connected: bool = False  #网关是否已连接
+    trade_paused: bool = False  # 是否暂停交易
+    gateway_connected: bool = False  # 网关是否已连接
     risk_status: dict = Field(default_factory=dict, description="风控状态")
-    
-    #账户状态
+
+    # 账户状态
     status: Optional[TraderState] = Field(TraderState.STOPPED, description="交易状态")
-
-
-
 
 
 class ContractData(BaseModel):
@@ -385,9 +377,6 @@ class ContractData(BaseModel):
         return f"{self.symbol}.{self.exchange.value}"
 
 
-
-
-
 # ==================== 请求模型 ====================
 
 
@@ -419,7 +408,7 @@ class CancelRequest(BaseModel):
 
 # ==================== 常量定义 ====================
 
-ACTIVE_STATUSES = {OrderStatus.SUBMITTING, OrderStatus.NOTTRADED, OrderStatus.PARTTRADED}
+ACTIVE_STATUSES = {OrderStatus.PENDING}
 
 
 class OrderCmdFinishReason(str, Enum):

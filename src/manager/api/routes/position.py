@@ -34,7 +34,9 @@ async def get_positions(
         positions_dict = await trading_manager.get_positions(account_id)
 
         # 过滤禁用账户的持仓数据
-        enabled_accounts = set(acc.account_id for acc in trading_manager.account_configs if acc.enabled)
+        enabled_accounts = set(
+            acc.account_id for acc in trading_manager.account_configs if acc.enabled
+        )
         filtered_positions = {k: v for k, v in positions_dict.items() if k in enabled_accounts}
 
         # 转换为列表

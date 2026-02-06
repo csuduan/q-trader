@@ -6,18 +6,17 @@
 import csv
 import os
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Optional, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.app_context import get_app_context
-from src.models.object import BarData, Direction, Exchange, Offset,TickData
-from src.utils.event_engine import EventEngine, EventTypes
-from src.utils.logger import get_logger
-from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
-
-from src.trader.strategy.base_strategy import BaseStrategy
-from src.utils.config_loader import StrategyConfig
+from src.models.object import BarData, Direction, Exchange, Offset, TickData
 from src.trader.core.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd
+from src.trader.strategy.base_strategy import BaseStrategy
+from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
+from src.utils.config_loader import StrategyConfig
+from src.utils.event_engine import EventEngine, EventTypes
+from src.utils.logger import get_logger
 
 ctx = get_app_context()
 
@@ -64,7 +63,7 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
         dict: 合并后的策略参数
     """
     # 从YAML配置复制参数
-    params={}
+    params = {}
     params_file = config.params_file
     if not params_file:
         return {}
@@ -94,15 +93,14 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
 class StrategyManager:
     """策略管理器"""
 
-    def __init__(self, strategies_config: Dict[str, StrategyConfig], trading_engine:TradingEngine):
+    def __init__(self, strategies_config: Dict[str, StrategyConfig], trading_engine: TradingEngine):
         self.strategies_configs: Dict[str, StrategyConfig] = strategies_config
         self.strategies: Dict[str, BaseStrategy] = {}
-        self.trading_engine:TradingEngine = trading_engine
+        self.trading_engine: TradingEngine = trading_engine
         self.subscribed_symbols: set = set()
         # 订单ID -> 策略ID 的映射关系
         self.order_strategy_map: Dict[str, str] = {}
         # cmd_id -> 策略ID 的映射关系
-        self.cmd_strategy_map: Dict[str, str] = {}
         self.event_engine: Optional[EventEngine] = None
 
         # Bar生成器管理器 (symbol -> BarGenerator)
@@ -152,7 +150,7 @@ class StrategyManager:
 
             # 创建策略实例
             try:
-                strategy = strategy_class(name,config)
+                strategy = strategy_class(name, config)
                 strategy.strategy_manager = self
                 self.strategies[name] = strategy
                 logger.info(f"添加策略: {name}")
@@ -160,7 +158,7 @@ class StrategyManager:
                 # 按需订阅合约行情
                 symbol = config.params.get("symbol", "")
                 if symbol:
-                    self.subscribe_symbol(symbol,config.bar)
+                    self.subscribe_symbol(symbol, config.bar)
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
                     # 如果策略需要bar，初始化BarGenerator订阅
                     # if config.bar:
@@ -191,10 +189,6 @@ class StrategyManager:
         self.event_engine.register(
             EventTypes.TRADE_UPDATE, lambda data: self._dispatch_order_event("on_trade", data)
         )
-        # 报单指令更新事件 - 分发给对应策略
-        self.event_engine.register(
-            EventTypes.ORDER_CMD_UPDATE, self._on_cmd_update
-        )
 
         logger.info("策略事件已注册到EventEngine")
 
@@ -215,27 +209,26 @@ class StrategyManager:
             data: 事件数据
         """
         # 如果是tick事件，更新BarGenerator
-        #if method == "on_tick" and hasattr(data, "symbol"):
+        # if method == "on_tick" and hasattr(data, "symbol"):
         #    self._update_bar_generator(data)
 
         if method == "on_bar" and hasattr(data, "symbol"):
-            bar:BarData = data
+            bar: BarData = data
             for name, strategy in self.strategies.items():
                 if strategy.enabled and bar.id in strategy.bar_subscriptions:
                     try:
                         strategy.on_bar(bar)
                     except Exception as e:
                         logger.exception(f"策略 {name} {method} 失败: {e}")
-        
+
         if method == "on_tick" and hasattr(data, "symbol"):
-            tick:TickData = data
+            tick: TickData = data
             for name, strategy in self.strategies.items():
-                if strategy.enabled :
+                if strategy.enabled:
                     try:
                         strategy.on_tick(tick)
                     except Exception as e:
                         logger.exception(f"策略 {name} {method} 失败: {e}")
-
 
     def _update_bar_generator(self, tick) -> None:
         """
@@ -297,27 +290,6 @@ class StrategyManager:
         else:
             self._dispatch_market_event(method, data)
 
-    def _on_cmd_update(self, cmd: OrderCmd) -> None:
-        """处理报单指令更新事件"""
-        strategy_id = self.cmd_strategy_map.get(cmd.cmd_id)
-        if not strategy_id or strategy_id not in self.strategies:
-            return
-
-        strategy = self.strategies[strategy_id]
-        if strategy.enabled:
-            try:
-                strategy.on_cmd_update(cmd)
-                logger.debug(
-                    f"策略 [{strategy_id}] 收到报单指令更新: "
-                    f"{cmd.cmd_id} status={cmd.status}"
-                )
-            except Exception as e:
-                logger.exception(f"策略 [{strategy_id}] on_cmd_update 失败: {e}")
-
-        # 指令完成后清理映射
-        if cmd.is_finished:
-            self.cmd_strategy_map.pop(cmd.cmd_id, None)
-
     def start_strategy(self, name: str) -> bool:
         """启动策略"""
         if name not in self.strategies:
@@ -348,17 +320,18 @@ class StrategyManager:
                 strategy.init()
         logger.info("所有策略已重置")
 
-    def subscribe_symbol(self, symbol: str,interval:str) -> bool:
+    def subscribe_symbol(self, symbol: str, interval: str) -> bool:
         """订阅合约行情（按需订阅）"""
         if not self.trading_engine:
             return False
-        self.trading_engine.subscribe_symbol(symbol)  
+        self.trading_engine.subscribe_symbol(symbol)
         if interval:
-            self.trading_engine.subscribe_bars(symbol,interval)  
+            self.trading_engine.subscribe_bars(symbol, interval)
         return True
 
     def get_status(self) -> list:
         """获取所有策略状态"""
+
         def _get_trading_status(signal: dict) -> str:
             """根据信号获取交易状态"""
             if not signal or signal.get("side") == 0:
@@ -377,7 +350,9 @@ class StrategyManager:
                 "config": s.config.model_dump(),
                 "params": s.get_params(),
                 "signal": s.get_signal() if hasattr(s, "get_signal") else {},
-                "trading_status": _get_trading_status(s.get_signal() if hasattr(s, "get_signal") else {}),
+                "trading_status": _get_trading_status(
+                    s.get_signal() if hasattr(s, "get_signal") else {}
+                ),
             }
             for s in self.strategies.values()
         ]
@@ -439,13 +414,11 @@ class StrategyManager:
             order_cmd: 订单指令对象
         """
         try:
-            self.cmd_strategy_map[order_cmd.cmd_id] = strategy_id
             self.trading_engine.insert_order_cmd(order_cmd)
             logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")
         except Exception as e:
-            self.cmd_strategy_map.pop(order_cmd.cmd_id, None)
             logger.exception(f"策略 [{strategy_id}] 发送订单指令失败: {e}")
-    
+
     def cancel_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
         """
         取消订单指令 - 通过 TradingEngine
@@ -454,16 +427,34 @@ class StrategyManager:
             strategy_id: 策略ID
             order_cmd: 订单指令对象
         """
-        if not self.trading_engine:
-            logger.warning(f"TradingEngine 未设置，无法执行撤单")
-            return
-
         try:
             self.trading_engine.cancel_order_cmd(order_cmd.cmd_id)
-            self.cmd_strategy_map.pop(order_cmd.cmd_id, None)
             logger.info(f"策略 [{strategy_id}] 取消订单指令: {order_cmd}")
         except Exception as e:
             logger.error(f"策略 [{strategy_id}] 取消订单指令失败: {e}")
+
+    def get_position(self, symbol: str) -> Optional["PositionData"]:
+        """
+        获取指定合约的持仓信息
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            PositionData: 持仓数据，如果不存在则返回None
+        """
+        from src.models.object import PositionData
+
+        if self.trading_engine and self.trading_engine.positions:
+            # 先直接用 symbol 查找
+            pos = self.trading_engine.positions.get(symbol)
+            if pos:
+                return pos
+            # 如果没找到，尝试遍历所有持仓（可能 symbol 格式不一致）
+            for p in self.trading_engine.positions.values():
+                if p.symbol == symbol:
+                    return p
+        return None
 
     def open(
         self,
@@ -577,7 +568,9 @@ class StrategyManager:
                 continue
 
             # 注册bar回调
-            bar_gen.subscribe(interval_str, lambda bar, sid=strategy_id: self._on_bar_completed(sid, bar))
+            bar_gen.subscribe(
+                interval_str, lambda bar, sid=strategy_id: self._on_bar_completed(sid, bar)
+            )
 
             # 记录策略订阅
             if symbol not in self._strategy_bar_subscriptions:
@@ -589,7 +582,7 @@ class StrategyManager:
 
             logger.debug(f"策略 {strategy_id} 订阅 {symbol} 的 {interval_str} bar")
 
-    def _on_bar_completed(self, strategy_id: str, bar:BarData) -> None:
+    def _on_bar_completed(self, strategy_id: str, bar: BarData) -> None:
         """
         Bar生成完成时的回调
 
@@ -672,6 +665,7 @@ class StrategyManager:
             bool: 回播是否成功
         """
         from datetime import datetime, timedelta
+
         strategy_id = strategy.strategy_id
         logger.info(f"策略 [{strategy_id}] 开始回播流程")
 
@@ -686,11 +680,11 @@ class StrategyManager:
 
             # 3. 从网关获取kline
             # 获取策略订阅的合约和周期
-            if len(strategy.bar_subscriptions)==0:
+            if len(strategy.bar_subscriptions) == 0:
                 logger.error(f"策略 [{strategy_id}] 未配置bar订阅")
                 return False
 
-            (symbol, interval) = strategy.bar_subscriptions[0].split("-")
+            symbol, interval = strategy.bar_subscriptions[0].split("-")
             # 通过网关获取K线数据
             kline_df = self.trading_engine.get_kline(symbol, interval)
             if kline_df is None:
@@ -701,20 +695,21 @@ class StrategyManager:
             # 筛选当前交易日的bar (K线时间戳是纳秒级)
             trading_bars = []
             for _, row in kline_df.iterrows():
-                bar_datetime = row['datetime']
+                bar_datetime = row["datetime"]
                 if bar_datetime.date() == trading_date:
                     # 转换为BarData
                     from src.models.object import BarData
+
                     bar = BarData(
                         symbol=symbol,
                         interval=interval,
                         datetime=bar_datetime,
-                        open_price=float(row['open']),
-                        high_price=float(row['high']),
-                        low_price=float(row['low']),
-                        close_price=float(row['close']),
-                        volume=float(row['volume']),
-                        type='history'
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        type="history",
                     )
                     trading_bars.append(bar)
 
@@ -763,7 +758,7 @@ class StrategyManager:
             return {"success": False, "message": "网关未连接", "replayed_count": 0}
 
         gateway = self.trading_engine.gateway
-        if not hasattr(gateway, '_klines'):
+        if not hasattr(gateway, "_klines"):
             logger.error("网关不支持获取K线数据")
             return {"success": False, "message": "网关不支持K线数据", "replayed_count": 0}
 
@@ -773,15 +768,15 @@ class StrategyManager:
             replayed_count = 0
             # 2. 对每个策略执行回播
             for _, strategy in self.strategies.items():
-                    ret = await self.replay_strategy(strategy)
-                    if ret:
-                        replayed_count += 1
+                ret = await self.replay_strategy(strategy)
+                if ret:
+                    replayed_count += 1
             logger.info(f"所有策略回播完成，成功回播 {replayed_count} 个策略")
 
             return {
                 "success": True,
                 "replayed_count": replayed_count,
-                "message": f"成功回播 {replayed_count} 个策略"
+                "message": f"成功回播 {replayed_count} 个策略",
             }
 
         except Exception as e:

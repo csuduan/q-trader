@@ -81,9 +81,7 @@ class Database:
         return self.SessionLocal()
 
 
-def init_database(
-    db_path: str, account_id: str = "default", echo: bool = False
-) -> Database:
+def init_database(db_path: str, account_id: str = "default", echo: bool = False) -> Database:
     """
     初始化数据库
 
@@ -140,6 +138,7 @@ def close_database() -> None:
         _db.engine.dispose()
         _db = None
         logger.info("数据库连接已关闭")
+
 
 @contextmanager
 def session_scope():

@@ -16,13 +16,13 @@ from typing import Any, Dict, List, Optional, Union
 from sqlalchemy import True_
 from sqlalchemy.orm import Session as SQLASession
 
-from src.utils.config_loader import AppConfig, TraderConfig
-from src.utils.database import get_session
+from src.models.object import OrderCmdFinishReason
 from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.core.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd, SplitStrategyType
-from src.models.object import OrderCmdFinishReason
+from src.utils.config_loader import AppConfig, TraderConfig
+from src.utils.database import get_session
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
 
@@ -71,17 +71,16 @@ class SwitchPosManager:
             config: 应用配置（AppConfig 或 AccountConfig）
             trading_engine: 交易引擎实例
         """
-        self.config:TraderConfig = config
+        self.config: TraderConfig = config
         self.trading_engine = trading_engine
         self.switchPos_files_dir = config.paths.switchPos_files
         self.working = False
         self.running_instructions: Optional[List[RotationInstructionPo]] = None
         self.is_manual = False
-    
+
     def start(self):
         """启动换仓管理器"""
         pass
-
 
     def import_csv(self, csv_text: str, filename: str, mode: str = "replace"):
         """
@@ -313,16 +312,13 @@ class SwitchPosManager:
         try:
             # 重置所有指令状态
             for instruction in all_instructions:
-                if(instruction.filled_volume==instruction.volume):
+                if instruction.filled_volume >= instruction.volume:
                     instruction.status = "COMPLETED"
 
                 if instruction.status not in ("COMPLETED"):
                     instruction.status = "PENDING"
                     instruction.error_message = None
                     instruction.current_order_id = None
-                    # 使用 current_order_id 存储 order_cmd_id
-                    # if not instruction.current_order_id:
-                    #     instruction.remaining_volume = instruction.volume
 
             # 为每个指令创建OrderCmd
             for instruction in all_instructions:
@@ -344,10 +340,12 @@ class SwitchPosManager:
                     split_strategy=SplitStrategyType.SIMPLE,
                     max_volume_per_order=self.config.trading.risk_control.max_split_volume,
                     order_interval=0.5,
-                    total_timeout=self.config.trading.risk_control.order_timeout * 10,  # 总超时为单笔超时的10倍
+                    total_timeout=self.config.trading.risk_control.order_timeout
+                    * 10,  # 总超时为单笔超时的10倍
                     max_retries=3,
                     order_timeout=self.config.trading.risk_control.order_timeout,
                     source=f"换仓:{instruction.symbol}",
+                    on_change=self._on_cmd_changed,
                 )
                 self.trading_engine.insert_order_cmd(order_cmd)
                 if order_cmd:
@@ -366,6 +364,12 @@ class SwitchPosManager:
             self.working = False
             logger.info("换仓任务结束")
 
+    def _on_cmd_changed(self, order_cmd: OrderCmd):
+        """处理订单状态变化"""
+        if not order_cmd.is_finished:
+            return
+
+        pass
 
     def _monitor_order_commands(
         self,
@@ -660,42 +664,6 @@ class SwitchPosManager:
         except Exception as e:
             logger.error(f"读取CSV文件失败: {e}")
             return []
-
-    def _execute_instruction(self, instruction: OrderInstruction) -> bool:
-        """
-        执行订单指令
-
-        Args:
-            instruction: 订单指令
-
-        Returns:
-            bool: 是否执行成功
-        """
-        try:
-            if not self.trading_engine.is_subscribed(instruction.symbol):
-                self.trading_engine.subscribe_symbol(instruction.symbol)
-
-            order_id = self.trading_engine.insert_order(
-                symbol=instruction.symbol,
-                direction=instruction.direction,
-                offset=instruction.offset,
-                volume=instruction.volume,
-                price=instruction.price,
-            )
-
-            if order_id:
-                logger.info(
-                    f"执行订单指令成功: {instruction.symbol} {instruction.direction} "
-                    f"{instruction.offset} {instruction.volume}手, 委托单ID: {order_id}"
-                )
-                return True
-            else:
-                logger.warning(f"执行订单指令失败: {instruction}")
-                return False
-
-        except Exception as e:
-            logger.error(f"执行订单指令时出错: {e}")
-            return False
 
     def close_all_positions(self) -> None:
         """

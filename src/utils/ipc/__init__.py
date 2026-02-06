@@ -13,33 +13,57 @@ V2版本（推荐）:
 - RequestHandlerRegistry: 请求处理器注册表
 """
 
-# V1版本（向后兼容）
-from src.utils.ipc.socket_client import SocketClient as SocketClientV1
-from src.utils.ipc.socket_server import SocketServer as SocketServerV1, request
-
-# V2版本（推荐）
-from src.utils.ipc.socket_server_v2 import SocketServer, request as request_v2
-from src.utils.ipc.socket_client_v2 import SocketClient
-
 # 协议相关
 from src.utils.ipc.protocol import (
-    MessageType, MessageBody, MessageProtocol,
-    create_request, create_response, create_heartbeat, create_push, create_error
+    MessageBody,
+    MessageProtocol,
+    MessageType,
+    create_error,
+    create_heartbeat,
+    create_push,
+    create_request,
+    create_response,
 )
+
+# V1版本（向后兼容）
+from src.utils.ipc.socket_client import SocketClient as SocketClientV1
+from src.utils.ipc.socket_client_v2 import SocketClient
+from src.utils.ipc.socket_server import SocketServer as SocketServerV1
+from src.utils.ipc.socket_server import request
+
+# V2版本（推荐）
+from src.utils.ipc.socket_server_v2 import SocketServer
+from src.utils.ipc.socket_server_v2 import request as request_v2
 
 # 工具类
 from src.utils.ipc.utils import (
-    BackoffStrategy, HealthChecker, RequestHandlerRegistry, generate_request_id
+    BackoffStrategy,
+    HealthChecker,
+    RequestHandlerRegistry,
+    generate_request_id,
 )
 
 __all__ = [
     # V1版本（向后兼容）
-    "SocketClientV1", "SocketServerV1", "request",
+    "SocketClientV1",
+    "SocketServerV1",
+    "request",
     # V2版本（推荐）
-    "SocketClient", "SocketServer", "request_v2",
+    "SocketClient",
+    "SocketServer",
+    "request_v2",
     # 协议相关
-    "MessageType", "MessageBody", "MessageProtocol",
-    "create_request", "create_response", "create_heartbeat", "create_push", "create_error",
+    "MessageType",
+    "MessageBody",
+    "MessageProtocol",
+    "create_request",
+    "create_response",
+    "create_heartbeat",
+    "create_push",
+    "create_error",
     # 工具类
-    "BackoffStrategy", "HealthChecker", "RequestHandlerRegistry", "generate_request_id",
+    "BackoffStrategy",
+    "HealthChecker",
+    "RequestHandlerRegistry",
+    "generate_request_id",
 ]

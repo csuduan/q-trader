@@ -9,19 +9,28 @@ Socket服务器 - V2版本，使用标准协议
 """
 
 import asyncio
-from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Set, List
-from functools import wraps
 import uuid
+from functools import wraps
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from src.utils.logger import get_logger
 from src.utils.ipc.protocol import (
-    MessageType, MessageBody, MessageProtocol,
-    create_request, create_response, create_heartbeat, create_push, create_error
+    MessageBody,
+    MessageProtocol,
+    MessageType,
+    create_error,
+    create_heartbeat,
+    create_push,
+    create_request,
+    create_response,
 )
 from src.utils.ipc.utils import (
-    BackoffStrategy, HealthChecker, RequestHandlerRegistry, generate_request_id
+    BackoffStrategy,
+    HealthChecker,
+    RequestHandlerRegistry,
+    generate_request_id,
 )
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -40,6 +49,7 @@ def request(message_type: str) -> Callable:
         async def handle_connect(data: dict) -> bool:
             return True
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
@@ -53,8 +63,8 @@ def request(message_type: str) -> Callable:
                 raise
 
         # 保存元数据，供注册时使用
-        wrapper._message_type = message_type
-        wrapper._handler_func = func
+        wrapper._message_type = message_type  # type: ignore[attr-defined]
+        wrapper._handler_func = func  # type: ignore[attr-defined]
         return wrapper
 
     return decorator
@@ -67,7 +77,9 @@ class SocketClientConnection:
     封装单个客户端连接的读写流和状态。
     """
 
-    def __init__(self, conn_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, addr: Any):
+    def __init__(
+        self, conn_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, addr: Any
+    ):
         self.conn_id = conn_id
         self.reader = reader
         self.writer = writer
@@ -175,7 +187,7 @@ class SocketServer:
         socket_path: str,
         account_id: str,
         enable_health_check: bool = True,
-        health_check_interval: float = 30.0
+        health_check_interval: float = 30.0,
     ):
         self.socket_path = socket_path
         self.account_id = account_id
@@ -195,7 +207,7 @@ class SocketServer:
             "total_connections": 0,
             "messages_received": 0,
             "messages_sent": 0,
-            "errors": 0
+            "errors": 0,
         }
 
         logger.info(f"SocketServer V2 初始化: {socket_path}")
@@ -249,9 +261,7 @@ class SocketServer:
         Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
 
         # 创建Unix Domain Socket服务器
-        self.server = await asyncio.start_unix_server(
-            self._handle_client, path=self.socket_path
-        )
+        self.server = await asyncio.start_unix_server(self._handle_client, path=self.socket_path)
 
         # 启动健康检查任务
         if self._enable_health_check:
@@ -296,7 +306,9 @@ class SocketServer:
         except (PermissionError, OSError) as e:
             logger.warning(f"无法删除socket文件: {e}")
 
-    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         """处理客户端连接"""
         conn_id = str(uuid.uuid4())[:8]
         peer_name = writer.get_extra_info("peername")
@@ -353,7 +365,9 @@ class SocketServer:
                 request_data = message.data if isinstance(message.data, dict) else {}
                 request_type = request_data.get("type")
                 request_id = message.request_id
-                logger.info(f"连接[{conn_id}] 收到请求: {request_type} {request_id} from {conn.conn_id}")
+                logger.info(
+                    f"连接[{conn_id}] 收到请求: {request_type} {request_id} from {conn.conn_id}"
+                )
                 handler = self._req_handlers.get(request_type) if request_type else None
                 if handler:
                     try:
@@ -366,12 +380,16 @@ class SocketServer:
                             self._stats["messages_sent"] += 1
                         logger.info(f"连接[{conn_id}] 响应请求: {request_type} {request_id}")
                     except Exception as e:
-                        logger.exception(f"连接[{conn_id}] 处理请求:{request_type} {request_id}时出错: {e}")
+                        logger.exception(
+                            f"连接[{conn_id}] 处理请求:{request_type} {request_id}时出错: {e}"
+                        )
                         if await conn.send_message(create_response(None, request_id, error=str(e))):
                             self._stats["messages_sent"] += 1
                 else:
                     logger.warning(f"连接[{conn_id}] 未找到请求处理器: {request_type} {request_id}")
-                    if await conn.send_message(create_response(None, message.request_id, error="Unknown request type")):
+                    if await conn.send_message(
+                        create_response(None, message.request_id, error="Unknown request type")
+                    ):
                         self._stats["messages_sent"] += 1
 
             elif message.msg_type == MessageType.PUSH:
@@ -402,7 +420,9 @@ class SocketServer:
         MAX_MISSED_HEARTBEATS = 4  # 最大允许丢失的心跳次数
         CHECK_INTERVAL = 5.0  # 健康检查间隔（秒）
 
-        logger.info(f"健康检查任务已启动（心跳间隔: {HEARTBEAT_INTERVAL}s, 超时: {HEARTBEAT_INTERVAL * MAX_MISSED_HEARTBEATS}s）")
+        logger.info(
+            f"健康检查任务已启动（心跳间隔: {HEARTBEAT_INTERVAL}s, 超时: {HEARTBEAT_INTERVAL * MAX_MISSED_HEARTBEATS}s）"
+        )
 
         while self._running:
             try:
@@ -503,7 +523,7 @@ class SocketServer:
         return {
             **self._stats,
             "active_connections": self.get_connection_count(),
-            "total_clients": len(self._clients)
+            "total_clients": len(self._clients),
         }
 
     async def send_heartbeat(self) -> bool:

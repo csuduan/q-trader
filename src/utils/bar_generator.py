@@ -63,7 +63,9 @@ class BarGenerator:
 
         logger.debug(f"BarGenerator创建: {self.std_symbol}")
 
-    def subscribe(self, interval_str: str, callback: Optional[Callable[[BarData], None]] = None) -> bool:
+    def subscribe(
+        self, interval_str: str, callback: Optional[Callable[[BarData], None]] = None
+    ) -> bool:
         """
         订阅指定周期的bar
 
@@ -213,10 +215,7 @@ class BarGenerator:
             total_minutes = dt.hour * 60 + dt.minute
             period_minutes = (total_minutes // minutes) * minutes
             return dt.replace(
-                hour=period_minutes // 60,
-                minute=period_minutes % 60,
-                second=0,
-                microsecond=0
+                hour=period_minutes // 60, minute=period_minutes % 60, second=0, microsecond=0
             )
 
     def _get_interval_enum(self, minutes: int) -> Interval:

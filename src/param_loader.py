@@ -7,9 +7,9 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from src.utils.database import get_session
 from src.models.po import SystemParamPo
 from src.utils.config_loader import RiskControlConfig
+from src.utils.database import get_session
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

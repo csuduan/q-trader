@@ -5,13 +5,14 @@ Socket消息协议模块
 """
 
 import asyncio
-import simplejson as json
 import struct
 import uuid
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional, Callable, Union
+from typing import Any, Callable, Dict, Optional, Union
+
+import simplejson as json
 
 from src.utils.logger import get_logger
 
@@ -20,6 +21,7 @@ logger = get_logger(__name__)
 
 class MessageType(str, Enum):
     """消息类型枚举"""
+
     HEARTBEAT = "heartbeat"
     REQUEST = "request"
     RESPONSE = "response"
@@ -30,6 +32,7 @@ class MessageType(str, Enum):
 @dataclass
 class MessageBody:
     """消息体结构"""
+
     msg_type: MessageType  # 消息类型
     request_id: str  # 请求ID
     data: Any  # 请求数据
@@ -43,23 +46,24 @@ class MessageBody:
             "request_id": self.request_id,
             "data": self.data,
             "timestamp": self.timestamp,
-            "error": self.error
+            "error": self.error,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'MessageBody':
+    def from_dict(cls, data: Dict) -> "MessageBody":
         """从字典创建"""
         return cls(
             msg_type=MessageType(data["msg_type"]),
             request_id=data["request_id"],
             data=data["data"],
             timestamp=data["timestamp"],
-            error=data.get("error")
+            error=data.get("error"),
         )
 
 
 class MessageEncoder(json.JSONEncoder):
     """自定义JSON编码器"""
+
     def default(self, obj):
         if isinstance(obj, bytes):
             return {"__bytes__": obj.hex()}
@@ -94,13 +98,13 @@ class MessageProtocol:
             编码后的字节数据
         """
         # 将消息体转换为JSON
-        #json_data = self.encoder.encode(message.to_dict())
+        # json_data = self.encoder.encode(message.to_dict())
         json_data = json.dumps(message.to_dict(), ignore_nan=True, default=str)
-        message_bytes = json_data.encode('utf-8')
+        message_bytes = json_data.encode("utf-8")
 
         # 4字节长度 + 报文体
         length = len(message_bytes)
-        return struct.pack('!I', length) + message_bytes
+        return struct.pack("!I", length) + message_bytes
 
     def decode(self, data: bytes) -> Optional[MessageBody]:
         """
@@ -117,13 +121,13 @@ class MessageProtocol:
                 return None
 
             # 解析长度
-            length = struct.unpack('!I', data[:4])[0]
+            length = struct.unpack("!I", data[:4])[0]
 
             if len(data) < 4 + length:
                 return None
 
             # 解析JSON
-            json_data = data[4:4 + length].decode('utf-8')
+            json_data = data[4 : 4 + length].decode("utf-8")
             message_dict = json.loads(json_data, object_hook=message_decode_hook)
 
             return MessageBody.from_dict(message_dict)
@@ -148,7 +152,7 @@ class MessageProtocol:
                 return None
 
             # 解析消息长度
-            total_length = struct.unpack('!I', length_data)[0]
+            total_length = struct.unpack("!I", length_data)[0]
 
             # 读取消息体
             message_data = await reader.readexactly(total_length)
@@ -168,30 +172,17 @@ class MessageProtocol:
 # 便捷函数
 def create_request(data: Any, request_id: str) -> MessageBody:
     """创建请求消息"""
-    return MessageBody(
-        msg_type=MessageType.REQUEST,
-        request_id=request_id,
-        data=data
-    )
+    return MessageBody(msg_type=MessageType.REQUEST, request_id=request_id, data=data)
 
 
 def create_response(data: Any, request_id: str, error: Optional[str] = None) -> MessageBody:
     """创建响应消息"""
-    return MessageBody(
-        msg_type=MessageType.RESPONSE,
-        request_id=request_id,
-        data=data,
-        error=error
-    )
+    return MessageBody(msg_type=MessageType.RESPONSE, request_id=request_id, data=data, error=error)
 
 
 def create_heartbeat() -> MessageBody:
     """创建心跳消息"""
-    return MessageBody(
-        msg_type=MessageType.HEARTBEAT,
-        request_id="",
-        data=None
-    )
+    return MessageBody(msg_type=MessageType.HEARTBEAT, request_id="", data=None)
 
 
 def create_push(push_type: str, data: Any, request_id: str = "") -> MessageBody:
@@ -199,15 +190,10 @@ def create_push(push_type: str, data: Any, request_id: str = "") -> MessageBody:
     return MessageBody(
         msg_type=MessageType.PUSH,
         request_id=request_id or str(uuid.uuid4()),
-        data={"type": push_type, "data": data}
+        data={"type": push_type, "data": data},
     )
 
 
 def create_error(error: str, request_id: str = "") -> MessageBody:
     """创建错误消息"""
-    return MessageBody(
-        msg_type=MessageType.ERROR,
-        request_id=request_id,
-        data=None,
-        error=error
-    )
+    return MessageBody(msg_type=MessageType.ERROR, request_id=request_id, data=None, error=error)
