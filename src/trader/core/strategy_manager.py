@@ -700,7 +700,7 @@ class StrategyManager:
             trading_bars = []
             for _, row in kline_df.iterrows():
                 bar_datetime = row["datetime"]
-                if bar_datetime.date() == trading_date.date():
+                if bar_datetime.date() >= trading_date.date():
                     # 转换为BarData
                     from src.models.object import BarData
 
