@@ -700,7 +700,7 @@ class StrategyManager:
             trading_bars = []
             for _, row in kline_df.iterrows():
                 bar_datetime = row["datetime"]
-                if bar_datetime.date() == trading_date:
+                if bar_datetime.date() == trading_date.date():
                     # 转换为BarData
                     from src.models.object import BarData
 
@@ -728,7 +728,7 @@ class StrategyManager:
 
             # 5. 循环调用on_bar()
             for bar in trading_bars:
-                strategy.on_bar(bar)
+                await strategy.on_bar(bar)
 
             logger.info(f"策略 [{strategy_id}] K线回播完成")
 

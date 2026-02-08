@@ -142,7 +142,6 @@ class RsiStrategy(BaseStrategy):
                     logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
             if self.signal:
-                await self._execute_signal(bar, self.signal)
                 # 已经有信号了，当天不再产生新信号了
                 return
 
@@ -169,8 +168,6 @@ class RsiStrategy(BaseStrategy):
                 entry_time=short_bar.datetime,
             )
             logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
-            await self._execute_signal(bar, self.signal)
-
         except Exception as e:
             logger.exception(f"策略 [{self.strategy_id}] on_bar 异常: {e}")
 
