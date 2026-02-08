@@ -1,8 +1,9 @@
 """
 任务执行管理器模块
-管理所有定时任务的执行方法
+管理所有定时任务的执行方法（支持异步 TradingEngine）
 """
 
+import asyncio
 import csv
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,20 @@ from src.utils.database import get_session
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _run_async(coro):
+    """
+    在当前运行的事件循环中运行协程
+
+    用于从同步上下文调用异步方法
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        asyncio.run_coroutine_threadsafe(coro, loop)
+    except RuntimeError:
+        # 没有运行的事件循环
+        logger.warning("没有运行的事件循环，无法执行异步任务")
 
 
 class JobManager:
@@ -40,15 +55,12 @@ class JobManager:
         self.position_manager = position_manager
 
     def pre_market_connect(self) -> None:
-        """盘前自动连接"""
+        """盘前自动连接（异步版本）"""
         logger.info("开始执行盘前自动连接任务")
         try:
             if not self.trading_engine.connected:
-                success = self.trading_engine.connect()
-                if success:
-                    logger.info("盘前自动连接成功")
-                else:
-                    logger.error("盘前自动连接失败")
+                _run_async(self.trading_engine.connect())
+                logger.info("盘前自动连接任务已提交")
             else:
                 logger.info("交易引擎已连接，跳过盘前连接任务")
         except Exception as e:
@@ -64,12 +76,12 @@ class JobManager:
             logger.error(f"盘后导出持仓任务执行失败: {e}")
 
     def post_market_disconnect(self) -> None:
-        """盘后断开连接"""
+        """盘后断开连接（异步版本）"""
         logger.info("开始执行盘后断开连接任务")
         try:
             if self.trading_engine.connected:
-                self.trading_engine.disconnect()
-                logger.info("盘后断开连接成功")
+                _run_async(self.trading_engine.disconnect())
+                logger.info("盘后断开连接任务已提交")
             else:
                 logger.info("交易引擎已断开，跳过盘后断开连接任务")
         except Exception as e:

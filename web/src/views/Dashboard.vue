@@ -288,16 +288,9 @@ const currentRiskStatus = computed<RiskControlStatus>(() => {
   }
 })
 
-// 排序后的账户列表：已连接在前，已停止的在后
+// 账户列表：按API返回的原始顺序显示
 const sortedAccounts = computed(() => {
-  return [...store.accounts].sort((a, b) => {
-    // 如果都是已停止或都是已启动，保持原顺序
-    const aStopped = a.status === 'stopped' || !a.status
-    const bStopped = b.status === 'stopped' || !b.status
-    if (aStopped === bStopped) return 0
-    // 已停止的排在后面
-    return aStopped ? 1 : -1
-  })
+  return store.accounts
 })
 
 // 账户状态判断函数 - 基于status字段

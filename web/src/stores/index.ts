@@ -128,12 +128,10 @@ export const useStore = defineStore('main', () => {
   async function loadAllAccounts() {
     try {
       accounts.value = await accountApi.getAllAccounts()
-      // 如果有多个账户但还没选中，默认选中第一个已连接的账户
-      if (accounts.value.length > 1 && !selectedAccountId.value) {
+      // 如果有账户但还没选中，默认选中第一个已连接的账户
+      if (!selectedAccountId.value && accounts.value.length > 0) {
         const firstConnected = accounts.value.find(acc => acc.status === 'connected')
-        if (firstConnected) {
-          selectedAccountId.value = firstConnected.account_id
-        }
+        selectedAccountId.value = (firstConnected || accounts.value[0]).account_id
       }
     } catch (error) {
       console.error('加载账户列表失败:', error)

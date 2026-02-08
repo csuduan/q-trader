@@ -469,92 +469,50 @@ async def replay_all_strategies(
         return error_response(message=f"回播策略失败: {str(e)}")
 
 
-@router.post("/{strategy_id}/pause-opening")
-async def pause_strategy_opening(
+@router.post("/{strategy_id}/trading-status")
+async def set_strategy_trading_status(
     strategy_id: str,
+    request: dict = Body(..., description="交易状态设置"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
-    """暂停策略开仓"""
+    """
+    设置策略交易状态（统一接口）
+
+    支持同时设置开仓和平仓状态：
+    - opening_paused: 暂停/恢复开仓
+    - closing_paused: 暂停/恢复平仓
+
+    Args:
+        strategy_id: 策略ID
+        request: {"opening_paused": boolean, "closing_paused": boolean}
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
     try:
         trader = trading_manager.get_trader(account_id)
         if not trader:
             _handle_trader_not_found(account_id)
 
-        result = await trader.pause_strategy_opening(strategy_id)
+        result = await trader.set_strategy_trading_status(strategy_id, request)
         if result.get("success"):
-            return success_response(message=f"策略 {strategy_id} 暂停开仓成功")
+            # 构建详细的成功消息
+            changes = []
+            if "opening_paused" in request:
+                status = "暂停" if request["opening_paused"] else "恢复"
+                changes.append(f"开仓已{status}")
+            if "closing_paused" in request:
+                status = "暂停" if request["closing_paused"] else "恢复"
+                changes.append(f"平仓已{status}")
+            message = f"策略 {strategy_id} " + ", ".join(changes) + "成功"
+            return success_response(message=message, data=result.get("data"))
         else:
-            return error_response(message=result.get("message", "暂停开仓失败"))
+            return error_response(message=result.get("message", "设置交易状态失败"))
     except Exception as e:
-        logger.error(f"暂停策略开仓失败: {e}")
-        return error_response(message=f"暂停开仓失败: {str(e)}")
-
-
-@router.post("/{strategy_id}/resume-opening")
-async def resume_strategy_opening(
-    strategy_id: str,
-    account_id: str = Query(..., description="账户ID"),
-    trading_manager: TradingManager = Depends(get_trading_manager),
-):
-    """恢复策略开仓"""
-    try:
-        trader = trading_manager.get_trader(account_id)
-        if not trader:
-            _handle_trader_not_found(account_id)
-
-        result = await trader.resume_strategy_opening(strategy_id)
-        if result.get("success"):
-            return success_response(message=f"策略 {strategy_id} 恢复开仓成功")
-        else:
-            return error_response(message=result.get("message", "恢复开仓失败"))
-    except Exception as e:
-        logger.error(f"恢复策略开仓失败: {e}")
-        return error_response(message=f"恢复开仓失败: {str(e)}")
-
-
-@router.post("/{strategy_id}/pause-closing")
-async def pause_strategy_closing(
-    strategy_id: str,
-    account_id: str = Query(..., description="账户ID"),
-    trading_manager: TradingManager = Depends(get_trading_manager),
-):
-    """暂停策略平仓"""
-    try:
-        trader = trading_manager.get_trader(account_id)
-        if not trader:
-            _handle_trader_not_found(account_id)
-
-        result = await trader.pause_strategy_closing(strategy_id)
-        if result.get("success"):
-            return success_response(message=f"策略 {strategy_id} 暂停平仓成功")
-        else:
-            return error_response(message=result.get("message", "暂停平仓失败"))
-    except Exception as e:
-        logger.error(f"暂停策略平仓失败: {e}")
-        return error_response(message=f"暂停平仓失败: {str(e)}")
-
-
-@router.post("/{strategy_id}/resume-closing")
-async def resume_strategy_closing(
-    strategy_id: str,
-    account_id: str = Query(..., description="账户ID"),
-    trading_manager: TradingManager = Depends(get_trading_manager),
-):
-    """恢复策略平仓"""
-    try:
-        trader = trading_manager.get_trader(account_id)
-        if not trader:
-            _handle_trader_not_found(account_id)
-
-        result = await trader.resume_strategy_closing(strategy_id)
-        if result.get("success"):
-            return success_response(message=f"策略 {strategy_id} 恢复平仓成功")
-        else:
-            return error_response(message=result.get("message", "恢复平仓失败"))
-    except Exception as e:
-        logger.error(f"恢复策略平仓失败: {e}")
-        return error_response(message=f"恢复平仓失败: {str(e)}")
+        logger.error(f"设置策略交易状态失败: {e}")
+        return error_response(message=f"设置交易状态失败: {str(e)}")
 
 
 @router.post("/{strategy_id}/enable")
@@ -601,6 +559,56 @@ async def disable_strategy(
         return error_response(message=f"禁用策略失败: {str(e)}")
 
 
+@router.post("/{strategy_id}/reload-params")
+async def reload_strategy_params(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    重载策略参数
+    从配置文件重新加载策略参数
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.reload_strategy_params(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 参数重载成功", data=result.get("params"))
+        else:
+            return error_response(message=result.get("message", "重载参数失败"))
+    except Exception as e:
+        logger.error(f"重载策略参数失败: {e}")
+        return error_response(message=f"重载参数失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/init")
+async def init_strategy(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    初始化策略
+    调用策略的 init() 方法
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.init_strategy(strategy_id)
+        if result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 初始化成功")
+        else:
+            return error_response(message=result.get("message", "初始化策略失败"))
+    except Exception as e:
+        logger.error(f"初始化策略失败: {e}")
+        return error_response(message=f"初始化策略失败: {str(e)}")
+
+
 @router.get("/{strategy_id}/order-cmds")
 async def get_strategy_order_cmds(
     strategy_id: str,
@@ -622,3 +630,97 @@ async def get_strategy_order_cmds(
     except Exception as e:
         logger.error(f"获取策略报单指令失败: {e}")
         return error_response(message=f"获取报单指令失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/send-order-cmd")
+async def send_strategy_order_cmd(
+    strategy_id: str,
+    request: dict = Body(..., description="订单指令数据"),
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    发送策略报单指令
+
+    通过策略的 send_order_cmd 方法发送订单指令
+
+    Args:
+        strategy_id: 策略ID
+        request: {
+            "symbol": "合约代码",
+            "direction": "BUY/SELL",
+            "offset": "OPEN/CLOSE/CLOSETODAY",
+            "volume": 手数,
+            "price": 目标价格 (0表示市价)
+        }
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        from src.models.object import Direction, Offset
+
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        # 验证请求参数
+        symbol = request.get("symbol")
+        direction = request.get("direction")
+        offset = request.get("offset")
+        volume = request.get("volume")
+        price = request.get("price", 0)
+
+        if not all([symbol, direction, offset, volume is not None]):
+            return error_response(message="缺少必要参数: symbol, direction, offset, volume")
+
+        # 验证方向
+        if direction not in ["BUY", "SELL"]:
+            return error_response(message="direction 必须是 BUY 或 SELL")
+
+        # 验证开平
+        if offset not in ["OPEN", "CLOSE", "CLOSETODAY"]:
+            return error_response(message="offset 必须是 OPEN, CLOSE 或 CLOSETODAY")
+
+        # 验证手数
+        try:
+            volume = int(volume)
+            if volume <= 0:
+                return error_response(message="volume 必须大于0")
+        except (ValueError, TypeError):
+            return error_response(message="volume 必须是整数")
+
+        # 验证价格
+        try:
+            price = float(price) if price is not None else 0
+        except (ValueError, TypeError):
+            return error_response(message="price 必须是数字")
+
+        # 构造订单指令
+        from src.trader.order_cmd import OrderCmd
+
+        order_cmd = OrderCmd(
+            symbol=symbol,
+            direction=Direction(direction),
+            offset=Offset(offset),
+            volume=volume,
+            price=price,
+            source=f"手动-{strategy_id}",
+        )
+
+        # 发送到Trader进程
+        result = await trader.send_request(
+            "send_strategy_order_cmd",
+            {"strategy_id": strategy_id, "order_cmd": order_cmd.to_dict()},
+            timeout=10.0,
+        )
+
+        if result and result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 报单指令已发送", data={"cmd_id": order_cmd.cmd_id})
+        else:
+            return error_response(message=result.get("message", "发送报单指令失败") if result else "发送报单指令失败")
+
+    except Exception as e:
+        logger.error(f"发送策略报单指令失败: {e}")
+        return error_response(message=f"发送报单指令失败: {str(e)}")

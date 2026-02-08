@@ -4,7 +4,7 @@ Gateway适配器基类
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -25,10 +25,19 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 支持异步和同步回调
+AsyncTickCallback = Callable[[TickData], None] | Callable[[TickData], Awaitable[None]]
+AsyncBarCallback = Callable[[BarData], None] | Callable[[BarData], Awaitable[None]]
+AsyncOrderCallback = Callable[[OrderData], None] | Callable[[OrderData], Awaitable[None]]
+AsyncTradeCallback = Callable[[TradeData], None] | Callable[[TradeData], Awaitable[None]]
+AsyncPositionCallback = Callable[[PositionData], None] | Callable[[PositionData], Awaitable[None]]
+AsyncAccountCallback = Callable[[AccountData], None] | Callable[[AccountData], Awaitable[None]]
+AsyncContractCallback = Callable[[ContractData], None] | Callable[[ContractData], Awaitable[None]]
+
 
 class BaseGateway(ABC):
     """
-    Gateway抽象基类
+    Gateway抽象基类（异步版本）
 
     职责：
     1. 连接/断开交易接口
@@ -41,6 +50,7 @@ class BaseGateway(ABC):
     - 不处理业务逻辑（如风控、策略）
     - 不保存状态（状态由上层AccountManager管理）
     - 不直接访问数据库
+    - 所有公共接口改为异步
     """
 
     # Gateway名称
@@ -54,18 +64,18 @@ class BaseGateway(ABC):
         self.connected: bool = False
         self.trading_day: Optional[str] = None
 
-        # 回调函数（由上层注册）
-        self.on_tick_callback: Optional[Callable[[TickData], None]] = None
-        self.on_bar_callback: Optional[Callable[[BarData], None]] = None
-        self.on_order_callback: Optional[Callable[[OrderData], None]] = None
-        self.on_trade_callback: Optional[Callable[[TradeData], None]] = None
-        self.on_position_callback: Optional[Callable[[PositionData], None]] = None
-        self.on_account_callback: Optional[Callable[[AccountData], None]] = None
-        self.on_contract_callback: Optional[Callable[[ContractData], None]] = None
+        # 回调函数（由上层注册，支持异步）
+        self.on_tick_callback: Optional[AsyncTickCallback] = None
+        self.on_bar_callback: Optional[AsyncBarCallback] = None
+        self.on_order_callback: Optional[AsyncOrderCallback] = None
+        self.on_trade_callback: Optional[AsyncTradeCallback] = None
+        self.on_position_callback: Optional[AsyncPositionCallback] = None
+        self.on_account_callback: Optional[AsyncAccountCallback] = None
+        self.on_contract_callback: Optional[AsyncContractCallback] = None
 
         # 策略专用回调
-        self.on_tick_strategy: Optional[Callable[[TickData], None]] = None
-        self.on_bar_strategy: Optional[Callable[[BarData], None]] = None
+        self.on_tick_strategy: Optional[AsyncTickCallback] = None
+        self.on_bar_strategy: Optional[AsyncBarCallback] = None
 
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
 
@@ -76,13 +86,13 @@ class BaseGateway(ABC):
         注册回调函数
 
         Args:
-            on_tick: tick行情回调
-            on_bar: bar行情回调
-            on_order: 订单状态回调
-            on_trade: 成交回调
-            on_position: 持仓回调
-            on_account: 账户回调
-            on_contract: 合约回调
+            on_tick: tick行情回调（支持异步）
+            on_bar: bar行情回调（支持异步）
+            on_order: 订单状态回调（支持异步）
+            on_trade: 成交回调（支持异步）
+            on_position: 持仓回调（支持异步）
+            on_account: 账户回调（支持异步）
+            on_contract: 合约回调（支持异步）
         """
         self.on_tick_callback = callbacks.get("on_tick")
         self.on_bar_callback = callbacks.get("on_bar")
@@ -95,7 +105,7 @@ class BaseGateway(ABC):
         logger.info(f"{self.gateway_name} 回调注册完成")
 
     def register_strategy_callbacks(
-        self, on_tick: Callable[[TickData], None], on_bar: Callable[[BarData], None]
+        self, on_tick: AsyncTickCallback, on_bar: AsyncBarCallback
     ):
         """注册策略专用回调"""
         self.on_tick_strategy = on_tick
@@ -105,7 +115,7 @@ class BaseGateway(ABC):
     # ==================== 连接管理 ====================
 
     @abstractmethod
-    def connect(self) -> bool:
+    async def connect(self) -> bool:
         """
         连接到交易接口
 
@@ -115,7 +125,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def disconnect(self) -> bool:
+    async def disconnect(self) -> bool:
         """
         断开交易接口连接
 
@@ -137,7 +147,7 @@ class BaseGateway(ABC):
     # ==================== 行情订阅 ====================
 
     @abstractmethod
-    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
+    async def subscribe(self, symbol: Union[str, List[str]]) -> bool:
         """
         订阅行情
 
@@ -150,7 +160,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def subscribe_bars(self, symbol: str, interval: str) -> bool:
+    async def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """
         订阅K线数据
 
@@ -166,7 +176,7 @@ class BaseGateway(ABC):
     # ==================== 交易接口 ====================
 
     @abstractmethod
-    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
+    async def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """
         下单
 
@@ -179,7 +189,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def cancel_order(self, req: CancelRequest) -> bool:
+    async def cancel_order(self, req: CancelRequest) -> bool:
         """
         撤单
 
@@ -268,44 +278,85 @@ class BaseGateway(ABC):
 
     # ==================== 数据推送（由子类调用）====================
 
-    def _emit_tick(self, tick: TickData):
-        """推送tick数据"""
+    async def _emit_tick(self, tick: TickData):
+        """推送tick数据（支持异步回调）"""
         if self.on_tick_callback:
-            self.on_tick_callback(tick)
+            if callable(self.on_tick_callback):
+                import asyncio
+                import inspect
+                if inspect.iscoroutinefunction(self.on_tick_callback):
+                    await self.on_tick_callback(tick)
+                else:
+                    self.on_tick_callback(tick)
         # 同时推送给策略
         if self.on_tick_strategy:
-            self.on_tick_strategy(tick)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_tick_strategy):
+                await self.on_tick_strategy(tick)
+            else:
+                self.on_tick_strategy(tick)
 
-    def _emit_bar(self, bar: BarData):
-        """推送bar数据"""
+    async def _emit_bar(self, bar: BarData):
+        """推送bar数据（支持异步回调）"""
         if self.on_bar_callback:
-            self.on_bar_callback(bar)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_bar_callback):
+                await self.on_bar_callback(bar)
+            else:
+                self.on_bar_callback(bar)
 
-    def _emit_order(self, order: OrderData):
-        """推送订单数据"""
+    async def _emit_order(self, order: OrderData):
+        """推送订单数据（支持异步回调）"""
         logger.info(f"报单变动: {order}")
         if self.on_order_callback:
-            self.on_order_callback(order)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_order_callback):
+                await self.on_order_callback(order)
+            else:
+                self.on_order_callback(order)
 
-    def _emit_trade(self, trade: TradeData):
-        """推送成交数据"""
+    async def _emit_trade(self, trade: TradeData):
+        """推送成交数据（支持异步回调）"""
         logger.info(f"成交变动: {trade}")
         if self.on_trade_callback:
-            self.on_trade_callback(trade)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_trade_callback):
+                await self.on_trade_callback(trade)
+            else:
+                self.on_trade_callback(trade)
 
-    def _emit_position(self, position: PositionData):
-        """推送持仓数据"""
+    async def _emit_position(self, position: PositionData):
+        """推送持仓数据（支持异步回调）"""
         logger.info(f"持仓变动: {position}")
         if self.on_position_callback:
-            self.on_position_callback(position)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_position_callback):
+                await self.on_position_callback(position)
+            else:
+                self.on_position_callback(position)
 
-    def _emit_account(self, account: AccountData):
-        """推送账户数据"""
+    async def _emit_account(self, account: AccountData):
+        """推送账户数据（支持异步回调）"""
         # logger.info(f"账户变动: {account}")
         if self.on_account_callback:
-            self.on_account_callback(account)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_account_callback):
+                await self.on_account_callback(account)
+            else:
+                self.on_account_callback(account)
 
-    def _emit_contract(self, contract: ContractData):
-        """推送合约数据"""
+    async def _emit_contract(self, contract: ContractData):
+        """推送合约数据（支持异步回调）"""
         if self.on_contract_callback:
-            self.on_contract_callback(contract)
+            import asyncio
+            import inspect
+            if inspect.iscoroutinefunction(self.on_contract_callback):
+                await self.on_contract_callback(contract)
+            else:
+                self.on_contract_callback(contract)

@@ -25,12 +25,28 @@
             <el-tag size="small" type="info">{{ row.config.bar || '-' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="启用状态" width="120">
+        <el-table-column label="启用状态" width="100">
           <template #default="{ row }">
             <el-switch
               v-model="row.enabled"
               @change="handleToggleEnabled(row.strategy_id, row.enabled)"
               :loading="row.toggleLoading"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="暂停开仓" width="100">
+          <template #default="{ row }">
+            <el-checkbox
+              v-model="row.opening_paused"
+              @change="handleToggleOpeningPaused(row.strategy_id, row.opening_paused)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="暂停平仓" width="100">
+          <template #default="{ row }">
+            <el-checkbox
+              v-model="row.closing_paused"
+              @change="handleToggleClosingPaused(row.strategy_id, row.closing_paused)"
             />
           </template>
         </el-table-column>
@@ -66,7 +82,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -100,6 +116,8 @@ interface StrategyRes {
   params: Record<string, any>
   signal: SignalData
   trading_status: string
+  opening_paused: boolean
+  closing_paused: boolean
   toggleLoading?: boolean
 }
 
@@ -185,6 +203,34 @@ async function handleToggleEnabled(strategyId: string, enabled: boolean) {
     if (strategy) {
       strategy.toggleLoading = false
     }
+  }
+}
+
+async function handleToggleOpeningPaused(strategyId: string, paused: boolean) {
+  try {
+    await strategyApi.setTradingStatus(
+      strategyId,
+      { opening_paused: paused },
+      store.selectedAccountId || undefined
+    )
+    ElMessage.success(paused ? '已暂停开仓' : '已恢复开仓')
+    await loadStrategies()
+  } catch (error: any) {
+    ElMessage.error(`操作失败: ${error.message}`)
+  }
+}
+
+async function handleToggleClosingPaused(strategyId: string, paused: boolean) {
+  try {
+    await strategyApi.setTradingStatus(
+      strategyId,
+      { closing_paused: paused },
+      store.selectedAccountId || undefined
+    )
+    ElMessage.success(paused ? '已暂停平仓' : '已恢复平仓')
+    await loadStrategies()
+  } catch (error: any) {
+    ElMessage.error(`操作失败: ${error.message}`)
   }
 }
 

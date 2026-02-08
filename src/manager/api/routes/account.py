@@ -42,7 +42,8 @@ async def get_account_info(
         return success_response(
             data=AccountRes(
                 account_id=account_id,
-                broker_name=account_data.broker_name or "",
+                broker_type=account_data.broker_type or "--",
+                broker_name=account_data.broker_name if account_data.broker_type=="real" else "--",
                 currency=account_data.currency or "CNY",
                 balance=float(account_data.balance or 0),
                 available=float(account_data.available or 0),
@@ -89,7 +90,8 @@ async def get_all_accounts(
             accounts_list.append(
                 AccountRes(
                     account_id=account_info.account_id,
-                    broker_name=account_info.broker_name or "",
+                    broker_type=account_info.broker_type or "--",
+                    broker_name=account_info.broker_name if account_info.broker_type=="real" else "--",
                     currency=account_info.currency or "CNY",
                     balance=float(account_info.balance or 0),
                     available=float(account_info.available or 0),
@@ -106,8 +108,8 @@ async def get_all_accounts(
                     status=account_info.status.value if account_info.status else None,
                 )
             )
-
-        return success_response(data=accounts_list, message="获取成功")
+        sorted_list = sorted(accounts_list, key=lambda x: x.account_id)
+        return success_response(data=sorted_list, message="获取成功")
     except Exception as e:
         logger.exception(f"获取所有账户信息失败: {e}")
         return error_response(code=500, message=f"获取所有账户信息失败: {str(e)}")

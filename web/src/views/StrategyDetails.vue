@@ -18,56 +18,25 @@
               v-model="strategy.enabled"
               @change="handleToggleEnabled"
               :loading="actionLoading"
-              active-text="已启用"
-              inactive-text="已禁用"
             />
           </el-descriptions-item>
-          <el-descriptions-item label="开仓状态">
-            <el-tag :type="strategy.opening_paused ? 'danger' : 'success'" size="small">
-              {{ strategy.opening_paused ? '已暂停' : '正常' }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="平仓状态">
-            <el-tag :type="strategy.closing_paused ? 'danger' : 'success'" size="small">
-              {{ strategy.closing_paused ? '已暂停' : '正常' }}
-            </el-tag>
+          <el-descriptions-item label="交易控制">
+            <el-space :size="20">
+              <el-checkbox
+                v-model="strategy.opening_paused"
+                @change="handleTradingStatusChange"
+              >
+                暂停开仓
+              </el-checkbox>
+              <el-checkbox
+                v-model="strategy.closing_paused"
+                @change="handleTradingStatusChange"
+              >
+                暂停平仓
+              </el-checkbox>
+            </el-space>
           </el-descriptions-item>
         </el-descriptions>
-
-        <div class="action-buttons" v-if="strategy">
-          <el-space wrap>
-            <el-button
-              v-if="!strategy.opening_paused"
-              @click="handlePauseOpening"
-              :loading="actionLoading"
-            >
-              暂停开仓
-            </el-button>
-            <el-button
-              v-else
-              type="success"
-              @click="handleResumeOpening"
-              :loading="actionLoading"
-            >
-              恢复开仓
-            </el-button>
-            <el-button
-              v-if="!strategy.closing_paused"
-              @click="handlePauseClosing"
-              :loading="actionLoading"
-            >
-              暂停平仓
-            </el-button>
-            <el-button
-              v-else
-              type="success"
-              @click="handleResumeClosing"
-              :loading="actionLoading"
-            >
-              恢复平仓
-            </el-button>
-          </el-space>
-        </div>
       </el-card>
 
     <!-- 策略参数设置 -->
@@ -76,106 +45,62 @@
         <span>参数设置</span>
       </template>
       <el-form :model="paramsForm" label-width="140px" v-if="strategy">
+        <!-- 基础参数 -->
+        <el-divider content-position="left">基础参数</el-divider>
         <el-row :gutter="20">
-          <el-col :span="8">
-            <el-form-item label="合约代码">
-              <el-input v-model="paramsForm.symbol" placeholder="如: IM2603" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="时间类型">
-              <el-select v-model="paramsForm.bar" placeholder="选择时间类型">
-                <el-option label="1分钟" value="M1" />
-                <el-option label="5分钟" value="M5" />
-                <el-option label="15分钟" value="M15" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="目标手数">
-              <el-input-number v-model="paramsForm.volume_per_trade" :min="1" :max="100" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <el-form-item label="最大持仓">
-              <el-input-number v-model="paramsForm.max_position" :min="1" :max="100" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="止盈率">
-              <el-input-number v-model="paramsForm.take_profit_pct" :min="0" :max="1" :step="0.001" :precision="4" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="止损率">
-              <el-input-number v-model="paramsForm.stop_loss_pct" :min="0" :max="1" :step="0.001" :precision="4" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <el-form-item label="强平时间">
+          <el-col v-for="param in strategy.base_params" :key="param.key" :span="8">
+            <el-form-item :label="param.label">
+              <el-input v-if="param.type === 'string'" v-model="paramsForm[param.key]" style="width: 60%"/>
+              <el-input-number
+                v-else-if="param.type === 'int' || param.type === 'float'"
+                v-model="paramsForm[param.key]"
+                :step="param.type === 'float' ? 0.001 : 1"
+                :precision="param.type === 'float' ? 4 : 0"
+                style="width: 60%"
+              />
+              <el-switch v-else-if="param.type === 'bool'" v-model="paramsForm[param.key]" />
               <el-time-picker
-                v-model="forceExitTimeValue"
+                v-else-if="param.type === 'time'"
+                v-model="paramsForm[param.key]"
                 format="HH:mm:ss"
                 value-format="HH:mm:ss"
-                placeholder="选择时间"
-                @change="handleForceExitTimeChange"
+                style="width: 60%"
               />
             </el-form-item>
           </el-col>
         </el-row>
 
-        <!-- RSI 策略特定参数 -->
-        <template v-if="isRsiStrategy">
-          <el-divider content-position="left">RSI 策略参数</el-divider>
-          <el-row :gutter="20">
-            <el-col :span="8">
-              <el-form-item label="RSI 周期">
-                <el-input-number v-model="paramsForm.rsi_n" :min="2" :max="100" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="短 K 线周期">
-                <el-input-number v-model="paramsForm.short_k" :min="1" :max="60" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="长 K 线周期">
-                <el-input-number v-model="paramsForm.long_k" :min="1" :max="120" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="20">
-            <el-col :span="8">
-              <el-form-item label="长 RSI 阈值">
-                <el-input-number v-model="paramsForm.long_threshold" :min="0" :max="100" :step="0.1" :precision="1" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="短 RSI 阈值">
-                <el-input-number v-model="paramsForm.short_threshold" :min="0" :max="100" :step="0.1" :precision="1" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="信号方向阈值">
-                <el-input-number v-model="paramsForm.dir_thr" :min="0" :max="1" :step="0.1" :precision="1" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="20">
-            <el-col :span="8">
-              <el-form-item label="使用外部信号">
-                <el-switch v-model="paramsForm.use_signal" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </template>
+        <!-- 扩展参数 -->
+        <el-divider content-position="left">扩展参数</el-divider>
+        <el-row :gutter="20" v-if="strategy.ext_params && strategy.ext_params.length > 0">
+          <el-col v-for="param in strategy.ext_params" :key="param.key" :span="8">
+            <el-form-item :label="param.label">
+              <el-input v-if="param.type === 'string'" v-model="paramsForm[param.key]" style="width: 60%" />
+              <el-input-number
+                v-else-if="param.type === 'int' || param.type === 'float'"
+                v-model="paramsForm[param.key]"
+                :step="param.type === 'float' ? 0.001 : 1"
+                :precision="param.type === 'float' ? 4 : 0"
+                style="width: 60%"
+              />
+              <el-switch v-else-if="param.type === 'bool'" v-model="paramsForm[param.key]" />
+              <el-time-picker
+                v-else-if="param.type === 'time'"
+                v-model="paramsForm[param.key]"
+                format="HH:mm:ss"
+                value-format="HH:mm:ss"
+                style="width: 60%"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
 
         <el-form-item>
-          <el-button type="primary" @click="handleSaveParams" :loading="saveLoading">保存参数</el-button>
+          <el-space>
+            <el-button type="primary" @click="handleSaveParams" :loading="saveLoading">保存参数</el-button>
+            <el-button @click="handleReloadParams" :loading="actionLoading">重载参数</el-button>
+            <el-button @click="handleInitStrategy" :loading="actionLoading">初始化策略</el-button>
+          </el-space>
         </el-form-item>
       </el-form>
     </el-card>
@@ -183,11 +108,11 @@
     <!-- 策略信号设置 -->
     <el-card shadow="hover" class="section">
       <template #header>
-        <span>信号设置</span>
+        <span>信号与持仓</span>
       </template>
       <el-form :model="signalForm" label-width="140px" v-if="strategy">
         <el-row :gutter="20">
-          <el-col :span="8">
+          <el-col :span="24">
             <el-form-item label="信号方向">
               <el-radio-group v-model="signalForm.side">
                 <el-radio :label="0">无信号</el-radio>
@@ -196,27 +121,70 @@
               </el-radio-group>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
-            <el-form-item label="入场价格" v-if="signalForm.side !== 0">
-              <el-input-number v-model="signalForm.entry_price" :min="0" :step="0.1" :precision="2" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="目标手数" v-if="signalForm.side !== 0">
-              <el-input-number v-model="signalForm.entry_volume" :min="1" :max="100" />
-            </el-form-item>
-          </el-col>
         </el-row>
+
+        <!-- 入场信息 -->
+        <template v-if="signalForm.side !== 0">
+          <el-divider content-position="left">入场信息</el-divider>
+          <el-row :gutter="20">
+            <el-col :span="8">
+              <el-form-item label="入场时间">
+                <el-time-picker
+                  v-model="signalForm.entry_time"
+                  format="HH:mm:ss"
+                  value-format="HH:mm:ss"
+                  placeholder="选择时间"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="入场价格">
+                <el-input-number v-model="signalForm.entry_price" :min="0" :step="0.1" :precision="2" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="入场手数">
+                <el-input-number v-model="signalForm.entry_volume" :min="1" :max="100" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 退场信息 -->
+          <el-divider content-position="left">退场信息</el-divider>
+          <el-row :gutter="20">
+            <el-col :span="8">
+              <el-form-item label="退场时间">
+                <el-time-picker
+                  v-model="signalForm.exit_time"
+                  format="HH:mm:ss"
+                  value-format="HH:mm:ss"
+                  placeholder="选择时间"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="退场价格">
+                <el-input-number v-model="signalForm.exit_price" :min="0" :step="0.1" :precision="2" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="退场原因">
+                <el-input v-model="signalForm.exit_reason" placeholder="退场原因" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </template>
+
         <el-divider content-position="left">当前持仓状态</el-divider>
         <el-row :gutter="20">
           <el-col :span="8">
             <el-form-item label="持仓手数">
-              <el-input-number v-model="signalForm.pos_volume" :min="0" :max="100" disabled />
+              <el-input-number v-model="signalForm.pos_volume" :min="0" :max="100" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
             <el-form-item label="持仓均价">
-              <el-input-number v-model="signalForm.pos_price" :min="0" :step="0.1" :precision="2" disabled />
+              <el-input-number v-model="signalForm.pos_price" :min="0" :step="0.1" :precision="2" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -231,15 +199,18 @@
       <template #header>
         <div class="card-header">
           <span>报单指令历史</span>
-          <el-radio-group v-model="orderCmdFilter" @change="loadOrderCmds" size="small">
-            <el-radio-button label="all">全部</el-radio-button>
-            <el-radio-button label="active">进行中</el-radio-button>
-            <el-radio-button label="finished">已完成</el-radio-button>
-          </el-radio-group>
+          <div class="header-actions">
+            <el-button type="primary" size="small" @click="showAddOrderCmdDialog">新增指令</el-button>
+            <el-radio-group v-model="orderCmdFilter" @change="loadOrderCmds" size="small">
+              <el-radio-button label="active">进行中</el-radio-button>
+              <el-radio-button label="finished">已完成</el-radio-button>
+              <el-radio-button label="all">全部</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
       </template>
       <el-table :data="orderCmds" stripe v-loading="orderCmdsLoading" table-layout="auto">
-        <el-table-column prop="cmd_id" label="指令ID" width="200" />
+        <el-table-column prop="cmd_id" label="指令ID" width="120" show-overflow-tooltip/>
         <el-table-column prop="symbol" label="合约" width="120" />
         <el-table-column label="方向" width="80">
           <template #default="{ row }">
@@ -265,12 +236,46 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="finish_reason" label="完成原因" width="180"  show-overflow-tooltip/>
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
     </el-card>
     </template>
+
+    <!-- 新增指令对话框 -->
+    <el-dialog v-model="addOrderCmdDialogVisible" title="新增报单指令" width="500px">
+      <el-form :model="orderCmdForm" label-width="100px" :rules="orderCmdFormRules" ref="orderCmdFormRef">
+        <el-form-item label="合约代码" prop="symbol">
+          <el-input v-model="orderCmdForm.symbol" placeholder="如: CFFEX.IM2603" />
+        </el-form-item>
+        <el-form-item label="操作类型" prop="offset">
+          <el-select v-model="orderCmdForm.offset" placeholder="请选择">
+            <el-option label="开仓" value="OPEN" />
+            <el-option label="平仓" value="CLOSE" />
+            <el-option label="平今" value="CLOSETODAY" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="方向" prop="direction">
+          <el-radio-group v-model="orderCmdForm.direction">
+            <el-radio label="BUY">买入</el-radio>
+            <el-radio label="SELL">卖出</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="手数" prop="volume">
+          <el-input-number v-model="orderCmdForm.volume" :min="1" :max="100" />
+        </el-form-item>
+        <el-form-item label="目标价格" prop="price">
+          <el-input-number v-model="orderCmdForm.price" :min="0" :step="0.1" :precision="2" placeholder="0表示市价" />
+          <div class="form-tip">设置为0表示市价单</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addOrderCmdDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleAddOrderCmd" :loading="addOrderCmdLoading">发送</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -291,7 +296,7 @@ const loading = ref(false)
 const actionLoading = ref(false)
 const saveLoading = ref(false)
 
-const paramsForm = ref<any>({
+const paramsForm = ref<Record<string, any>>({
   symbol: '',
   bar: 'M1',
   volume_per_trade: 1,
@@ -299,33 +304,42 @@ const paramsForm = ref<any>({
   take_profit_pct: 0.015,
   stop_loss_pct: 0.015,
   slippage: 0,
-  force_exit_time: '14:55:00',
-  rsi_n: 5,
-  short_k: 5,
-  long_k: 15,
-  long_threshold: 50,
-  short_threshold: 55,
-  dir_thr: 0,
-  use_signal: true
+  force_exit_time: '14:55:00'
 })
 
 const signalForm = ref<any>({
   side: 0,
+  entry_time: '',
   entry_price: 0,
   entry_volume: 1,
+  exit_time: '',
+  exit_price: 0,
+  exit_reason: '',
   pos_volume: 0,
   pos_price: null
 })
 
-const forceExitTimeValue = ref('')
-
 const orderCmds = ref<any[]>([])
 const orderCmdsLoading = ref(false)
-const orderCmdFilter = ref<'all' | 'active' | 'finished'>('all')
+const orderCmdFilter = ref<'all' | 'active' | 'finished'>('active')
 
-const isRsiStrategy = computed(() => {
-  return strategyId.toLowerCase().includes('rsi') || false
+// 新增指令对话框
+const addOrderCmdDialogVisible = ref(false)
+const addOrderCmdLoading = ref(false)
+const orderCmdFormRef = ref()
+const orderCmdForm = ref({
+  symbol: '',
+  direction: 'BUY' as 'BUY' | 'SELL',
+  offset: 'OPEN' as 'OPEN' | 'CLOSE' | 'CLOSETODAY',
+  volume: 1,
+  price: 0
 })
+const orderCmdFormRules = {
+  symbol: [{ required: true, message: '请输入合约代码', trigger: 'blur' }],
+  offset: [{ required: true, message: '请选择操作类型', trigger: 'change' }],
+  direction: [{ required: true, message: '请选择方向', trigger: 'change' }],
+  volume: [{ required: true, message: '请输入手数', trigger: 'blur' }]
+}
 
 function goBack() {
   router.push('/strategy')
@@ -373,39 +387,40 @@ async function loadStrategy() {
   loading.value = true
   try {
     strategy.value = await strategyApi.getStrategy(strategyId, store.selectedAccountId || undefined)
-    // 初始化参数表单
-    const params = strategy.value.params || {}
-    paramsForm.value = {
-      symbol: params.symbol || strategy.value.config?.symbol || '',
-      bar: params.bar || 'M1',
-      volume_per_trade: params.volume_per_trade || 1,
-      max_position: params.max_position || 5,
-      take_profit_pct: params.take_profit_pct || 0.015,
-      stop_loss_pct: params.stop_loss_pct || 0.015,
-      slippage: params.slippage || 0,
-      force_exit_time: params.force_exit_time || '14:55:00',
-      rsi_n: params.rsi_n || 5,
-      short_k: params.short_k || 5,
-      long_k: params.long_k || 15,
-      long_threshold: params.long_threshold || 50,
-      short_threshold: params.short_threshold || 55,
-      dir_thr: params.dir_thr || 0,
-      use_signal: params.use_signal !== undefined ? params.use_signal : true
+
+    // 从base_params和ext_params构建paramsForm
+    if (strategy.value.base_params) {
+      paramsForm.value = {}
+      for (const param of [...strategy.value.base_params, ...(strategy.value.ext_params || [])]) {
+        paramsForm.value[param.key] = param.value
+      }
+    } else {
+      // 向后兼容：使用旧的params字段
+      const params = strategy.value.params || {}
+      const extParams = strategy.value.ext_params || {}
+      paramsForm.value = {
+        ...params,
+        ...extParams
+      }
     }
-    forceExitTimeValue.value = paramsForm.value.force_exit_time || '14:55:00'
 
     // 初始化信号表单
     const signal = strategy.value.signal || {}
     signalForm.value = {
       side: signal.side || 0,
+      entry_time: signal.entry_time || '',
       entry_price: signal.entry_price || 0,
-      entry_volume: signal.entry_volume || paramsForm.value.volume_per_trade,
-      pos_volume: signal.pos_volume || 0,
-      pos_price: signal.pos_price || null
+      entry_volume: signal.entry_volume || paramsForm.value.volume_per_trade || 1,
+      exit_time: signal.exit_time || '',
+      exit_price: signal.exit_price || 0,
+      exit_reason: signal.exit_reason || '',
+      // 使用API返回的持仓数据
+      pos_volume: strategy.value.pos_volume || 0,
+      pos_price: strategy.value.pos_price || null
     }
   } catch (error: any) {
     ElMessage.error(`加载策略失败: ${error.message}`)
-    strategy.value = null  // 确保为 null，v-if="strategy" 会阻止渲染
+    strategy.value = null
   } finally {
     loading.value = false
   }
@@ -441,60 +456,50 @@ async function handleToggleEnabled(enabled: boolean) {
   }
 }
 
-async function handlePauseOpening() {
+async function handleTradingStatusChange() {
   actionLoading.value = true
   try {
-    await strategyApi.pauseStrategyOpening(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success('暂停开仓成功')
-    await loadStrategy()
+    await strategyApi.setTradingStatus(
+      strategyId,
+      {
+        opening_paused: strategy.value.opening_paused,
+        closing_paused: strategy.value.closing_paused
+      },
+      store.selectedAccountId || undefined
+    )
+    ElMessage.success('交易状态已更新')
   } catch (error: any) {
-    ElMessage.error(`暂停开仓失败: ${error.message}`)
+    ElMessage.error(`更新交易状态失败: ${error.message}`)
+    await loadStrategy()
   } finally {
     actionLoading.value = false
   }
 }
 
-async function handleResumeOpening() {
+async function handleReloadParams() {
   actionLoading.value = true
   try {
-    await strategyApi.resumeStrategyOpening(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success('恢复开仓成功')
+    const result = await strategyApi.reloadStrategyParams(strategyId, store.selectedAccountId || undefined)
+    ElMessage.success('参数重载成功')
     await loadStrategy()
   } catch (error: any) {
-    ElMessage.error(`恢复开仓失败: ${error.message}`)
+    ElMessage.error(`重载参数失败: ${error.message}`)
   } finally {
     actionLoading.value = false
   }
 }
 
-async function handlePauseClosing() {
+async function handleInitStrategy() {
   actionLoading.value = true
   try {
-    await strategyApi.pauseStrategyClosing(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success('暂停平仓成功')
+    await strategyApi.initStrategy(strategyId, store.selectedAccountId || undefined)
+    ElMessage.success('策略初始化成功')
     await loadStrategy()
   } catch (error: any) {
-    ElMessage.error(`暂停平仓失败: ${error.message}`)
+    ElMessage.error(`初始化策略失败: ${error.message}`)
   } finally {
     actionLoading.value = false
   }
-}
-
-async function handleResumeClosing() {
-  actionLoading.value = true
-  try {
-    await strategyApi.resumeStrategyClosing(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success('恢复平仓成功')
-    await loadStrategy()
-  } catch (error: any) {
-    ElMessage.error(`恢复平仓失败: ${error.message}`)
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-function handleForceExitTimeChange(value: string) {
-  paramsForm.value.force_exit_time = value
 }
 
 async function handleSaveParams() {
@@ -520,6 +525,47 @@ async function handleSaveSignal() {
     ElMessage.error(`保存信号失败: ${error.message}`)
   } finally {
     saveLoading.value = false
+  }
+}
+
+function showAddOrderCmdDialog() {
+  // 预填充合约代码
+  if (strategy.value?.params?.symbol) {
+    orderCmdForm.value.symbol = `${strategy.value.params.exchange || 'CFFEX'}.${strategy.value.params.symbol}`
+  } else if (strategy.value?.config?.symbol) {
+    orderCmdForm.value.symbol = `${strategy.value.config.exchange || 'CFFEX'}.${strategy.value.config.symbol}`
+  }
+  // 重置表单
+  orderCmdForm.value.direction = 'BUY'
+  orderCmdForm.value.offset = 'OPEN'
+  orderCmdForm.value.volume = 1
+  orderCmdForm.value.price = 0
+  addOrderCmdDialogVisible.value = true
+}
+
+async function handleAddOrderCmd() {
+  await orderCmdFormRef.value?.validate()
+  addOrderCmdLoading.value = true
+  try {
+    const result = await strategyApi.sendStrategyOrderCmd(
+      strategyId,
+      {
+        symbol: orderCmdForm.value.symbol,
+        direction: orderCmdForm.value.direction,
+        offset: orderCmdForm.value.offset,
+        volume: orderCmdForm.value.volume,
+        price: orderCmdForm.value.price
+      },
+      store.selectedAccountId || undefined
+    )
+    ElMessage.success(`报单指令已发送: ${result.cmd_id}`)
+    addOrderCmdDialogVisible.value = false
+    // 刷新报单指令列表
+    await loadOrderCmds()
+  } catch (error: any) {
+    ElMessage.error(`发送报单指令失败: ${error.message}`)
+  } finally {
+    addOrderCmdLoading.value = false
   }
 }
 
@@ -566,5 +612,17 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
 }
 </style>

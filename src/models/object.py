@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from sqlalchemy.util import b
 
 # ==================== 枚举定义 ====================
 
@@ -223,6 +224,7 @@ class OrderData(BaseModel):
 
     insert_time: Optional[DateTime] = Field(None, description="下单时间")
     update_time: Optional[DateTime] = Field(None, description="最后更新时间")
+    canceled: bool = Field(default=False, description="是否已取消")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
@@ -235,6 +237,9 @@ class OrderData(BaseModel):
     def is_active(self) -> bool:
         """是否为活动订单"""
         return self.status == OrderStatus.PENDING
+    
+    def can_cancel(self) -> bool:
+        return self.status == OrderStatus.PENDING and not self.canceled
 
 
 class TradeData(BaseModel):
@@ -334,6 +339,7 @@ class AccountData(BaseModel):
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
+    broker_type: Optional[str] = Field(None, description="经纪商类型")
     broker_name: Optional[str] = Field(None, description="经纪商名称")
     currency: Optional[str] = Field(None, description="交易货币")
     user_id: Optional[str] = Field(None, description="用户ID")

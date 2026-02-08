@@ -76,35 +76,12 @@ export const strategyApi = {
   },
 
   /**
-   * 暂停策略开仓
+   * 设置策略交易状态（统一接口）
+   * 支持同时设置开仓和平仓状态
    */
-  pauseStrategyOpening: async (strategyId: string, accountId?: string): Promise<void> => {
+  setTradingStatus: async (strategyId: string, status: { opening_paused?: boolean, closing_paused?: boolean }, accountId?: string): Promise<void> => {
     const config = accountId ? { params: { account_id: accountId } } : undefined
-    await api.post(`/strategies/${strategyId}/pause-opening`, null, config)
-  },
-
-  /**
-   * 恢复策略开仓
-   */
-  resumeStrategyOpening: async (strategyId: string, accountId?: string): Promise<void> => {
-    const config = accountId ? { params: { account_id: accountId } } : undefined
-    await api.post(`/strategies/${strategyId}/resume-opening`, null, config)
-  },
-
-  /**
-   * 暂停策略平仓
-   */
-  pauseStrategyClosing: async (strategyId: string, accountId?: string): Promise<void> => {
-    const config = accountId ? { params: { account_id: accountId } } : undefined
-    await api.post(`/strategies/${strategyId}/pause-closing`, null, config)
-  },
-
-  /**
-   * 恢复策略平仓
-   */
-  resumeStrategyClosing: async (strategyId: string, accountId?: string): Promise<void> => {
-    const config = accountId ? { params: { account_id: accountId } } : undefined
-    await api.post(`/strategies/${strategyId}/resume-closing`, null, config)
+    await api.post(`/strategies/${strategyId}/trading-status`, status, config)
   },
 
   /**
@@ -124,6 +101,22 @@ export const strategyApi = {
   },
 
   /**
+   * 重载策略参数
+   */
+  reloadStrategyParams: async (strategyId: string, accountId?: string): Promise<any> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    return api.post<any>(`/strategies/${strategyId}/reload-params`, null, config)
+  },
+
+  /**
+   * 初始化策略
+   */
+  initStrategy: async (strategyId: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/init`, null, config)
+  },
+
+  /**
    * 获取策略的报单指令历史
    */
   getStrategyOrderCmds: async (strategyId: string, filter?: StrategyOrderCmdFilter, accountId?: string): Promise<OrderCmdRes[]> => {
@@ -132,5 +125,19 @@ export const strategyApi = {
       params.status = filter.status
     }
     return api.get<OrderCmdRes[]>(`/strategies/${strategyId}/order-cmds`, { params })
+  },
+
+  /**
+   * 发送策略报单指令
+   */
+  sendStrategyOrderCmd: async (strategyId: string, orderCmd: {
+    symbol: string
+    direction: 'BUY' | 'SELL'
+    offset: 'OPEN' | 'CLOSE' | 'CLOSETODAY'
+    volume: number
+    price: number
+  }, accountId?: string): Promise<{ cmd_id: string }> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    return api.post<{ cmd_id: string }>(`/strategies/${strategyId}/send-order-cmd`, orderCmd, config)
   }
 }

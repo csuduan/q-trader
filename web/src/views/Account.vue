@@ -13,7 +13,12 @@
 
       <el-descriptions :column="2" border>
         <el-descriptions-item label="用户ID">{{ store.currentAccount.user_id || '-'}}</el-descriptions-item>
-        <el-descriptions-item label="券商">{{ store.currentAccount.broker_name || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="经纪商">
+          {{ store.currentAccount.broker_name || '-' }}
+          <el-tag v-if="store.currentAccount.broker_type" size="small" style="margin-left: 8px">
+            {{ getBrokerTypeName(store.currentAccount.broker_type) }}
+          </el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="币种">{{ store.currentAccount.currency }}</el-descriptions-item>
         <el-descriptions-item label="风险率">
           <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
@@ -329,6 +334,15 @@ function formatDateTime(datetime: string | number): string {
     ? new Date(datetime * 1000)
     : new Date(datetime)
   return date.toLocaleString('zh-CN')
+}
+
+function getBrokerTypeName(type: string | null): string {
+  const typeMap: Record<string, string> = {
+    'real': '实盘',
+    'sim': '模拟',
+    'kq': '快期'
+  }
+  return typeMap[type || ''] || type || ''
 }
 
 onMounted(async () => {

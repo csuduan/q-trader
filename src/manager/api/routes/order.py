@@ -10,6 +10,7 @@ from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import ManualOrderReq, OrderRes
 from src.manager.core.trading_manager import TradingManager
+from src.models.object import OrderStatus
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -46,17 +47,16 @@ async def get_orders(
                 orders_list = [
                     order
                     for order in orders_list
-                    if order.status == "REJECTED"
-                    or (order.status == "FINISHED" and order.volume_left == order.volume)
+                    if order.status == OrderStatus.REJECTED
                 ]
             elif status == "FINISHED":
                 orders_list = [
                     order
                     for order in orders_list
-                    if order.status == "FINISHED" and order.volume_left < order.volume
+                    if order.status == OrderStatus.FINISHED
                 ]
             else:
-                orders_list = [order for order in orders_list if order.status == status]
+                orders_list = [order for order in orders_list if order.status == OrderStatus.PENDING]
 
         total_count = len(orders_list)
         end_index = offset + limit

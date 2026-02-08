@@ -867,17 +867,22 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 更新策略信号请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
-    async def pause_strategy_opening(self, strategy_id: str) -> dict:
+    async def set_strategy_trading_status(self, strategy_id: str, status: dict) -> dict:
         """
-        暂停策略开仓
+        设置策略交易状态（统一接口）
+
+        支持同时设置开仓和平仓状态：
+        - opening_paused: 暂停/恢复开仓
+        - closing_paused: 暂停/恢复平仓
 
         通过socket发送请求到远程Trader
 
         Args:
             strategy_id: 策略ID
+            status: {"opening_paused": boolean, "closing_paused": boolean}
 
         Returns:
-            操作结果
+            操作结果，包含 {"success": bool, "message": str, "data": dict}
         """
         if not self.socket_client or not self.socket_client.is_connected():
             logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
@@ -885,86 +890,11 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "pause_strategy_opening", {"strategy_id": strategy_id}, timeout=10.0
+                "set_strategy_trading_status", {"strategy_id": strategy_id, "status": status}, timeout=10.0
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 暂停策略开仓请求失败: {e}")
-            return {"success": False, "message": f"请求失败: {str(e)}"}
-
-    async def resume_strategy_opening(self, strategy_id: str) -> dict:
-        """
-        恢复策略开仓
-
-        通过socket发送请求到远程Trader
-
-        Args:
-            strategy_id: 策略ID
-
-        Returns:
-            操作结果
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
-            return {"success": False, "message": "未连接"}
-
-        try:
-            response = await self.socket_client.request(
-                "resume_strategy_opening", {"strategy_id": strategy_id}, timeout=10.0
-            )
-            return response or {"success": False, "message": "无响应"}
-        except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 恢复策略开仓请求失败: {e}")
-            return {"success": False, "message": f"请求失败: {str(e)}"}
-
-    async def pause_strategy_closing(self, strategy_id: str) -> dict:
-        """
-        暂停策略平仓
-
-        通过socket发送请求到远程Trader
-
-        Args:
-            strategy_id: 策略ID
-
-        Returns:
-            操作结果
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
-            return {"success": False, "message": "未连接"}
-
-        try:
-            response = await self.socket_client.request(
-                "pause_strategy_closing", {"strategy_id": strategy_id}, timeout=10.0
-            )
-            return response or {"success": False, "message": "无响应"}
-        except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 暂停策略平仓请求失败: {e}")
-            return {"success": False, "message": f"请求失败: {str(e)}"}
-
-    async def resume_strategy_closing(self, strategy_id: str) -> dict:
-        """
-        恢复策略平仓
-
-        通过socket发送请求到远程Trader
-
-        Args:
-            strategy_id: 策略ID
-
-        Returns:
-            操作结果
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
-            return {"success": False, "message": "未连接"}
-
-        try:
-            response = await self.socket_client.request(
-                "resume_strategy_closing", {"strategy_id": strategy_id}, timeout=10.0
-            )
-            return response or {"success": False, "message": "无响应"}
-        except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 恢复策略平仓请求失败: {e}")
+            logger.error(f"TraderProxy [{self.account_id}] 设置策略交易状态请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
     async def enable_strategy(self, strategy_id: str) -> dict:
@@ -1015,6 +945,54 @@ class TraderProxy:
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 禁用策略请求失败: {e}")
+            return {"success": False, "message": f"请求失败: {str(e)}"}
+
+    async def reload_strategy_params(self, strategy_id: str) -> dict:
+        """
+        重载策略参数
+        从配置文件重新加载策略参数
+
+        Args:
+            strategy_id: 策略ID
+
+        Returns:
+            操作结果
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
+            return {"success": False, "message": "未连接"}
+
+        try:
+            response = await self.socket_client.request(
+                "reload_strategy_params", {"strategy_id": strategy_id}, timeout=10.0
+            )
+            return response or {"success": False, "message": "无响应"}
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 重载策略参数请求失败: {e}")
+            return {"success": False, "message": f"请求失败: {str(e)}"}
+
+    async def init_strategy(self, strategy_id: str) -> dict:
+        """
+        初始化策略
+        调用策略的 init() 方法
+
+        Args:
+            strategy_id: 策略ID
+
+        Returns:
+            操作结果
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
+            return {"success": False, "message": "未连接"}
+
+        try:
+            response = await self.socket_client.request(
+                "init_strategy", {"strategy_id": strategy_id}, timeout=30.0
+            )
+            return response or {"success": False, "message": "无响应"}
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 初始化策略请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
     async def get_strategy_order_cmds(self, strategy_id: str, status: Optional[str]) -> list:

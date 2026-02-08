@@ -1,5 +1,5 @@
 """
-交易引擎核心模块
+交易引擎核心模块（异步版本）
 负责连接API、管理交易会话、处理行情和交易
 """
 
@@ -8,7 +8,6 @@ import math
 import time
 import uuid
 from datetime import datetime
-from threading import Thread
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
@@ -28,8 +27,9 @@ from src.models.object import (
 from src.trader.core.risk_control import RiskControl
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
 from src.trader.order_cmd_executor import OrderCmdExecutor
+from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import AccountConfig, AppConfig
-from src.utils.event_engine import EventEngine, EventTypes
+from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
 from src.utils.wecomm import send_wechat
 
@@ -38,7 +38,7 @@ ctx = get_app_context()
 
 
 class TradingEngine:
-    """交易引擎类"""
+    """交易引擎类（异步版本）"""
 
     def __init__(
         self,
@@ -70,8 +70,8 @@ class TradingEngine:
             from src.utils.config_loader import RiskControlConfig
             self.risk_control = RiskControl(RiskControlConfig())
 
-        # 事件引擎
-        self.event_engine = ctx.get_event_engine()
+        # 异步事件引擎
+        self.event_engine: Optional[AsyncEventEngine] = None
 
         # 报单指令管理
         self._order_cmds: Dict[str, OrderCmd] = {}
@@ -86,9 +86,9 @@ class TradingEngine:
         # 加载风控数据
         self.reload_risk_control_config()  # type: ignore[attr-defined]
 
-    def start(self):
+    async def start(self):
         """
-        启动交易引擎
+        启动交易引擎（异步版本）
         """
         if self.gateway is None:
             logger.error("Gateway未初始化，无法启动交易引擎")
@@ -102,11 +102,8 @@ class TradingEngine:
             self._order_cmd_executor.start()
             logger.info("报单指令执行器已启动")
 
-        # 连接Gateway
-        if not self.gateway.connect():
-            logger.error("Gateway连接失败，无法启动交易引擎")
-            return
-
+        # 后台连接Gateway
+        await self.connect()
         logger.info(f"交易引擎 [{self.account_id}] 已启动")
 
     @property
@@ -201,6 +198,14 @@ class TradingEngine:
             self.gateway = TqGateway(gateway_config)
             logger.info("TqSdk Gateway创建成功")
 
+        # 初始化异步事件引擎
+        self.event_engine = ctx.get_event_engine()
+        if self.event_engine is None or not isinstance(self.event_engine, AsyncEventEngine):
+            # 创建新的异步事件引擎
+            self.event_engine = AsyncEventEngine(f"TradingEngine_{self.account_id}")
+            self.event_engine.start()
+            ctx.set(ctx.KEY_EVENT_ENGINE, self.event_engine)
+
         # 注册回调（Gateway → EventEngine）
         self.gateway.register_callbacks(
             on_tick=self._on_tick,
@@ -228,7 +233,7 @@ class TradingEngine:
             logger.warning(f"从数据库加载风控配置失败: {e}，使用配置文件默认值")
             return self.config.risk_control
 
-    def connect(self) -> bool:
+    async def connect(self) -> bool:
         """
         连接到交易系统（通过Gateway）
 
@@ -239,13 +244,14 @@ class TradingEngine:
             logger.info("连接到交易系统...")
             if self.gateway is None:
                 return False
-            return self.gateway.connect()
+            asyncio.create_task(self.gateway.connect())
+            return True
 
         except Exception as e:
             logger.exception(f"连接失败: {e}")
             return False
 
-    def disconnect(self) -> bool:
+    async def disconnect(self) -> bool:
         """
         断开与交易系统的连接（通过Gateway）
 
@@ -256,13 +262,13 @@ class TradingEngine:
             logger.info("断开与交易系统的连接...")
             if self.gateway is None:
                 return False
-            return self.gateway.disconnect()
+            return await self.gateway.disconnect()
 
         except Exception as e:
             logger.exception(f"断开连接失败: {e}")
             return False
 
-    def insert_order(
+    async def insert_order(
         self,
         symbol: str,
         direction: Union[str, Direction],
@@ -271,7 +277,7 @@ class TradingEngine:
         price: float = 0,
     ) -> Optional[OrderData]:
         """
-        下单
+        下单（异步版本）
 
         Args:
             symbol: 合约代码，支持格式：合约编号(如a2605)、合约编号.交易所(如a2605.DCE)、交易所.合约编号(如DCE.a2605)
@@ -314,12 +320,13 @@ class TradingEngine:
                 price=price if price > 0 else None,
             )
 
-            order_data = self.gateway.send_order(req)
+            order_data = await self.gateway.send_order(req)
 
             if order_data is not None:
                 logger.bind(tags=["trade"]).info(
                     f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_data.order_id}"
                 )
+                order_data.insert_time = datetime.now()
                 # 更新风控计数
                 self.risk_control.on_order_inserted()
 
@@ -328,9 +335,9 @@ class TradingEngine:
         except Exception as e:
             raise Exception(f"下单失败: {e}")
 
-    def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> bool:
         """
-        撤单（通过Gateway）
+        撤单（通过Gateway，异步版本）
 
         Args:
             order_id: 订单ID
@@ -340,7 +347,7 @@ class TradingEngine:
         """
         if self.gateway and self.gateway.connected:
             req = CancelRequest(order_id=order_id)
-            return self.gateway.cancel_order(req)
+            return await self.gateway.cancel_order(req)
 
         logger.warning("Gateway未初始化或未连接")
         return False
@@ -426,7 +433,7 @@ class TradingEngine:
 
         Args:
             symbol: 合约代码
-            interval: K线周期（
+            interval: K线周期
 
         Returns:
             Optional[pd.DataFrame]: K线数据框（如果成功），否则None
@@ -435,9 +442,9 @@ class TradingEngine:
             return self.gateway.get_kline(symbol, interval)
         return None
 
-    def subscribe_symbol(self, symbol: Union[str, List[str]]) -> bool:
+    async def subscribe_symbol(self, symbol: Union[str, List[str]]) -> bool:
         """
-        订阅合约行情（通过Gateway）
+        订阅合约行情（通过Gateway，异步版本）
 
         Args:
             symbol: 合约代码
@@ -446,12 +453,12 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            self.gateway.subscribe(symbol)
+            await self.gateway.subscribe(symbol)
         return True
 
-    def subscribe_bars(self, symbol: str, interval: str) -> bool:
+    async def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """
-        订阅合约行情（通过Gateway）
+        订阅合约行情（通过Gateway，异步版本）
 
         Args:
             symbol: 合约代码
@@ -460,7 +467,7 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            self.gateway.subscribe_bars(symbol, interval)
+            await self.gateway.subscribe_bars(symbol, interval)
         return True
 
     def _emit_event(self, event_type: str, data: Any) -> None:
@@ -484,38 +491,39 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"发送报单指令更新事件失败: {e}")
 
-    def _on_tick(self, tick):
-        """Gateway tick回调 → EventEngine"""
-        self.event_engine.put(EventTypes.TICK_UPDATE, tick)
-
-    def _on_bar(self, bar):
-        """Gateway bar回调 → EventEngine"""
+    async def _on_tick(self, tick):
+        """Gateway tick回调 → EventEngine（异步版本）"""
         if self.event_engine:
-            self.event_engine.put(EventTypes.KLINE_UPDATE, bar)
+            await self.event_engine.put_async(EventTypes.TICK_UPDATE, tick)
 
-    def _on_order(self, order: OrderData):
-        """Gateway order回调 → EventEngine"""
+    async def _on_bar(self, bar):
+        """Gateway bar回调 → EventEngine（异步版本）"""
         if self.event_engine:
-            self.event_engine.put(EventTypes.ORDER_UPDATE, order)
+            await self.event_engine.put_async(EventTypes.KLINE_UPDATE, bar)
+
+    async def _on_order(self, order: OrderData):
+        """Gateway order回调 → EventEngine（异步版本）"""
+        if self.event_engine:
+            await self.event_engine.put_async(EventTypes.ORDER_UPDATE, order)
         if order.status == OrderStatus.REJECTED and self.config.alert_wechat:
             send_wechat(f"账户[{self.account_id}]告警：{order.status_msg}")
 
-    def _on_trade(self, trade):
-        """Gateway trade回调 → EventEngine"""
+    async def _on_trade(self, trade):
+        """Gateway trade回调 → EventEngine（异步版本）"""
         if self.event_engine:
-            self.event_engine.put(EventTypes.TRADE_UPDATE, trade)
+            await self.event_engine.put_async(EventTypes.TRADE_UPDATE, trade)
 
-    def _on_position(self, position):
-        """Gateway position回调 → EventEngine"""
+    async def _on_position(self, position):
+        """Gateway position回调 → EventEngine（异步版本）"""
         if self.event_engine:
-            self.event_engine.put(EventTypes.POSITION_UPDATE, position)
+            await self.event_engine.put_async(EventTypes.POSITION_UPDATE, position)
 
-    def _on_account(self, account):
-        """Gateway account回调 → EventEngine"""
+    async def _on_account(self, account):
+        """Gateway account回调 → EventEngine（异步版本）"""
         if self.event_engine:
-            self.event_engine.put(EventTypes.ACCOUNT_UPDATE, account)
+            await self.event_engine.put_async(EventTypes.ACCOUNT_UPDATE, account)
 
-    def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
+    async def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
         """
         创建报单指令
 
@@ -536,11 +544,11 @@ class TradingEngine:
         Returns:
             指令ID
         """
-        # 保存引用xs
+        # 保存引用
         self._order_cmds[cmd.cmd_id] = cmd
         # 注册到执行器（注册即启动）
         if self._order_cmd_executor:
-            self._order_cmd_executor.register(cmd)
+            await self._order_cmd_executor.register(cmd)
 
         if "策略-" in cmd.source and self.config.alert_wechat:
             send_wechat(
@@ -550,18 +558,21 @@ class TradingEngine:
         logger.info(f"创建报单指令: {cmd.cmd_id} {cmd.symbol} {cmd.direction} {cmd.volume}手")
         return cmd.cmd_id
 
-    def cancel_order_cmd(self, cmd_id: str) -> bool:
+    async def cancel_order_cmd(self, cmd_id: str) -> bool:
         """
-        取消报单指令
+        取消报单指令（异步版本，使用后台任务）
 
         Args:
             cmd_id: 指令ID
 
         Returns:
-            是否成功
+            是否成功（立即返回，实际执行在后台）
         """
         if self._order_cmd_executor:
-            return self._order_cmd_executor.close(cmd_id)
+            # 使用 asyncio.create_task 在后台执行
+            #asyncio.create_task()
+            self._order_cmd_executor.close(cmd_id)
+            return True
         return False
 
     def get_order_cmd(self, cmd_id: str) -> Optional[dict]:
@@ -596,7 +607,7 @@ class TradingEngine:
         finished_cmds = [
             cmd_id
             for cmd_id, cmd in self._order_cmds.items()
-            if cmd.status == OrderCmdStatus.FINISHED
+            if cmd.is_finished
         ]
         for cmd_id in finished_cmds:
             # 从执行器注销

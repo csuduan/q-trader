@@ -8,6 +8,7 @@ import csv
 import os
 import shutil
 import time
+import asyncio
 from datetime import datetime
 from gc import enable
 from pathlib import Path
@@ -287,7 +288,7 @@ class SwitchPosManager:
         except Exception as e:
             logger.error(f"扫描订单文件时出错: {e}")
 
-    def execute_position_rotation(self, trading_type: str = "", is_manual: bool = False) -> None:
+    async def execute_position_rotation(self, trading_type: str = "", is_manual: bool = False) -> None:
         """
         执行换仓逻辑（使用OrderCmd）
 
@@ -337,17 +338,14 @@ class SwitchPosManager:
                     offset=instruction.offset,
                     volume=instruction.remaining_volume,
                     price=price,
-                    split_strategy=SplitStrategyType.SIMPLE,
                     max_volume_per_order=self.config.trading.risk_control.max_split_volume,
                     order_interval=0.5,
-                    total_timeout=self.config.trading.risk_control.order_timeout
-                    * 10,  # 总超时为单笔超时的10倍
-                    max_retries=3,
+                    total_timeout=self.config.trading.risk_control.order_timeout * 10,  # 总超时为单笔超时的10倍
                     order_timeout=self.config.trading.risk_control.order_timeout,
                     source=f"换仓:{instruction.symbol}",
                     on_change=self._on_cmd_changed,
                 )
-                self.trading_engine.insert_order_cmd(order_cmd)
+                await self.trading_engine.insert_order_cmd(order_cmd)
                 if order_cmd:
                     instruction.current_order_id = order_cmd.cmd_id
                     instruction.status = "RUNNING"
@@ -355,7 +353,8 @@ class SwitchPosManager:
                     logger.info(f"为指令 {instruction.symbol} 创建报单指令: {order_cmd.cmd_id}")
 
             # 监控OrderCmd执行状态
-            self._monitor_order_commands(all_instructions)
+            #self._monitor_order_commands(all_instructions)
+            await asyncio.to_thread(self._monitor_order_commands, all_instructions)
 
         except Exception as e:
             logger.exception(f"换仓执行时出错: {e}")
@@ -549,7 +548,7 @@ class SwitchPosManager:
 
     def _cancel_order(self, order_id: str) -> bool:
         """
-        撤单
+        撤单（异步版本）
 
         Args:
             order_id: 委托单ID
@@ -558,8 +557,13 @@ class SwitchPosManager:
             bool: 是否成功
         """
         try:
-            if order_id and self.trading_engine.cancel_order(str(order_id)):
-                logger.info(f"撤单成功: {order_id}")
+            import asyncio
+            loop = asyncio.get_running_loop()
+            if order_id:
+                asyncio.run_coroutine_threadsafe(
+                    self.trading_engine.cancel_order(str(order_id)), loop
+                )
+                logger.info(f"撤单请求已提交: {order_id}")
                 return True
             else:
                 logger.warning(f"撤单失败: {order_id}")
@@ -698,7 +702,7 @@ class SwitchPosManager:
 
     def _close_position(self, symbol: str, direction: str, volume: int) -> None:
         """
-        平仓
+        平仓（异步版本）
 
         Args:
             symbol: 合约代码
@@ -706,14 +710,19 @@ class SwitchPosManager:
             volume: 平仓手数
         """
         try:
-            order_id = self.trading_engine.insert_order(
-                symbol=symbol,
-                direction=direction,
-                offset="CLOSE",
-                volume=volume,
-                price=0,  # 市价
+            import asyncio
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(
+                self.trading_engine.insert_order(
+                    symbol=symbol,
+                    direction=direction,
+                    offset="CLOSE",
+                    volume=volume,
+                    price=0,  # 市价
+                ),
+                loop,
             )
-            logger.info(f"平仓报单成功: {symbol} {direction} {volume}手, 委托单ID: {order_id}")
+            logger.info(f"平仓报单已提交: {symbol} {direction} {volume}手")
         except Exception as e:
             logger.error(f"平仓报单失败 {symbol}: {e}")
             raise

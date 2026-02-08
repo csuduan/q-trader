@@ -1,8 +1,9 @@
 """
-策略管理器
+策略管理器（支持异步 TradingEngine）
 负责策略实例化、启动/停止管理、事件路由、参数加载
 """
 
+import asyncio
 import csv
 import os
 from datetime import datetime
@@ -118,7 +119,7 @@ class StrategyManager:
         try:
             self.event_engine = ctx.get_event_engine()
             # 加载并实例化策略
-            self._load_strategies()
+            await self._load_strategies()
             # 注册事件到 EventEngine
             self._register_events()
             # 启动所有策略
@@ -130,7 +131,7 @@ class StrategyManager:
             logger.exception(f"策略管理器初始化失败: {e}")
             return False
 
-    def _load_strategies(self) -> None:
+    async def _load_strategies(self) -> None:
         """从配置加载并实例化策略"""
         from src.trader.strategy import get_strategy_class
 
@@ -153,12 +154,13 @@ class StrategyManager:
                 strategy = strategy_class(name, config)
                 strategy.strategy_manager = self
                 self.strategies[name] = strategy
+                strategy.init()
                 logger.info(f"添加策略: {name}")
 
                 # 按需订阅合约行情
                 symbol = config.params.get("symbol", "")
                 if symbol:
-                    self.subscribe_symbol(symbol, config.bar)
+                    await self.subscribe_symbol(symbol, config.bar)
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
                     # 如果策略需要bar，初始化BarGenerator订阅
                     # if config.bar:
@@ -320,13 +322,13 @@ class StrategyManager:
                 strategy.init()
         logger.info("所有策略已重置")
 
-    def subscribe_symbol(self, symbol: str, interval: str) -> bool:
+    async def subscribe_symbol(self, symbol: str, interval: str) -> bool:
         """订阅合约行情（按需订阅）"""
         if not self.trading_engine:
             return False
-        self.trading_engine.subscribe_symbol(symbol)
+        await self.trading_engine.subscribe_symbol(symbol)
         if interval:
-            self.trading_engine.subscribe_bars(symbol, interval)
+            await self.trading_engine.subscribe_bars(symbol, interval)
         return True
 
     def get_status(self) -> list:
@@ -348,7 +350,9 @@ class StrategyManager:
                 "enabled": s.enabled,
                 "inited": s.inited,
                 "config": s.config.model_dump(),
-                "params": s.get_params(),
+                "params": s.get_params(),  # 保留向后兼容
+                "base_params": s.get_params().get("base", []),
+                "ext_params": s.get_params().get("ext", []),
                 "signal": s.get_signal() if hasattr(s, "get_signal") else {},
                 "trading_status": _get_trading_status(
                     s.get_signal() if hasattr(s, "get_signal") else {}
@@ -359,7 +363,7 @@ class StrategyManager:
 
     # ==================== 交易接口 ====================
 
-    def _insert_order(
+    async def _insert_order(
         self,
         strategy_id: str,
         symbol: str,
@@ -369,7 +373,7 @@ class StrategyManager:
         offset: Offset,
     ) -> Optional[str]:
         """
-        插入订单通用方法
+        插入订单通用方法（异步版本）
 
         Args:
             strategy_id: 策略ID
@@ -387,7 +391,7 @@ class StrategyManager:
             return None
 
         try:
-            order_id = self.trading_engine.insert_order(
+            order_id = await self.trading_engine.insert_order(
                 symbol=symbol,
                 direction=direction.value,
                 offset=offset.value,
@@ -405,7 +409,7 @@ class StrategyManager:
             logger.error(f"策略 [{strategy_id}] 下单失败: {e}")
             return None
 
-    def send_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
+    async def send_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
         """
         发送订单指令 - 通过 TradingEngine
 
@@ -414,12 +418,12 @@ class StrategyManager:
             order_cmd: 订单指令对象
         """
         try:
-            self.trading_engine.insert_order_cmd(order_cmd)
+            await self.trading_engine.insert_order_cmd(order_cmd)
             logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")
         except Exception as e:
             logger.exception(f"策略 [{strategy_id}] 发送订单指令失败: {e}")
 
-    def cancel_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
+    async def cancel_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
         """
         取消订单指令 - 通过 TradingEngine
 
@@ -428,7 +432,7 @@ class StrategyManager:
             order_cmd: 订单指令对象
         """
         try:
-            self.trading_engine.cancel_order_cmd(order_cmd.cmd_id)
+            await self.trading_engine.cancel_order_cmd(order_cmd.cmd_id)
             logger.info(f"策略 [{strategy_id}] 取消订单指令: {order_cmd}")
         except Exception as e:
             logger.error(f"策略 [{strategy_id}] 取消订单指令失败: {e}")
@@ -504,9 +508,9 @@ class StrategyManager:
         dir_enum = Direction.BUY if direction.upper() == "BUY" else Direction.SELL
         return self._insert_order(strategy_id, symbol, dir_enum, volume, price, Offset.CLOSE)
 
-    def cancel_order(self, strategy_id: str, order_id: str) -> bool:
+    async def cancel_order(self, strategy_id: str, order_id: str) -> bool:
         """
-        撤单 - 通过 TradingEngine
+        撤单 - 通过 TradingEngine（异步版本）
 
         Args:
             strategy_id: 策略ID
@@ -528,7 +532,7 @@ class StrategyManager:
             return False
 
         try:
-            success = self.trading_engine.cancel_order(order_id)
+            success = await self.trading_engine.cancel_order(order_id)
             if success:
                 logger.info(f"策略 [{strategy_id}] 撤单成功: {order_id}")
             return success

@@ -13,6 +13,7 @@ class AccountRes(BaseModel):
     """账户信息响应"""
 
     account_id: str
+    broker_type: Optional[str] = None
     broker_name: Optional[str] = None
     currency: str = "CNY"
     balance: float
@@ -203,11 +204,16 @@ class StrategyRes(BaseModel):
 
     strategy_id: str
     enabled: bool = False
+    opening_paused: bool = False
+    closing_paused: bool = False
     inited: bool = False
     config: dict | None = None
-    params: dict | None = None
+    base_params: List = []  # 基础参数定义
+    ext_params: List = []   # 扩展参数定义
     # 信号信息（从策略的get_signal()获取）
     signal: dict | None = None
+    pos_volume: int = 0  # 当前持仓量
+    pos_price: Optional[float] = None  # 当前持仓均价
     trading_status: str | None = None
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)

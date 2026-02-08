@@ -37,6 +37,7 @@ class OrderCmdStatus(str):
 
     PENDING = "PENDING"
     RUNNING = "RUNNING"
+    CANCELING = "CANCELING"  # 取消中（有挂单需要撤销）
     FINISHED = "FINISHED"
 
 
@@ -107,7 +108,7 @@ class SimpleSplitStrategy(BaseSplitStrategy):
         # 拆单处理
         while total_td_volume > 0:
             # 平今拆单
-            volume = min(total_td_volume, cmd.max_volume_per_order)
+            volume = min(total_td_volume, cmd.volume_per_order)
             self._order_queue.append(
                 SplitOrder(volume=volume, offset=Offset.CLOSETODAY, delay_seconds=0)
             )
@@ -115,11 +116,11 @@ class SimpleSplitStrategy(BaseSplitStrategy):
 
         while total_volume > 0:
             # 平昨拆单
-            volume = min(total_volume, cmd.max_volume_per_order)
+            volume = min(total_volume, cmd.volume_per_order)
             self._order_queue.append(SplitOrder(volume=volume, offset=cmd.offset, delay_seconds=0))
             total_volume -= volume
         logger.info(
-            f"拆单完成，拆成{len(self._order_queue)}个订单，每个订单最大手数{cmd.max_volume_per_order}"
+            f"拆单完成，拆成{len(self._order_queue)}个订单，每个订单最大手数{cmd.volume_per_order}"
         )
         return len(self._order_queue)
 
@@ -147,13 +148,13 @@ class OrderCmd:
         volume: int,
         price: Optional[float] = None,
         # 最大单次手数(默认10手)
-        max_volume_per_order: int = 10,
+        max_volume_per_order: int = 5,
         # 报单间隔(默认1秒)
         order_interval: float = 1,
         # 控制参数(默认5分钟)
-        total_timeout: int = 300,
+        total_timeout: int = 60*5,
         # 单次报单超时时间(默认10秒)
-        order_timeout: float = 10.0,
+        order_timeout: int = 10,
         # 来源标识
         source: str = "",
         on_change: Optional[Callable[[Any], None]] = None,
@@ -163,10 +164,10 @@ class OrderCmd:
         self.direction = direction
         self.offset = offset
         self.price = price  # 报单价格，0或None表示市价
-        self.max_volume_per_order = max_volume_per_order  # 最大单次手数
+        self.volume_per_order = max_volume_per_order  # 最大单次手数
         self.order_interval = order_interval  # 报单间隔
         self.order_timeout = order_timeout  # 单次报单超时
-        self.total_timeout = total_timeout  # 总超时时间
+        self.cmd_timeout = total_timeout  # 总超时时间
         self.source = source  # 来源标识，格式："策略-{strategy_id}" 或 "换仓-{strategy_id}"
         self.on_change = on_change  # 状态变化回调
         self.volume = volume  # 目标手数
@@ -215,7 +216,7 @@ class OrderCmd:
         self._cur_split_order = self._strategy.get_next()
         return self._cur_split_order
 
-    def trig(self, position: Optional[PositionData] = None) -> Optional[OrderRequest | OrderData]:
+    def trig(self) -> Optional[OrderRequest | OrderData]:
         """
         触发
 
@@ -227,38 +228,44 @@ class OrderCmd:
         """
         now = datetime.now()
 
-        # 更新持仓信息
-        if self.is_finished:
+        if  self.is_finished:
             return None
 
+        #1. 取消中处理
+        if self.status == OrderCmdStatus.CANCELING :
+            # 取消中，有挂单，且可以撤单
+            if self._pending_order and self._pending_order.can_cancel():
+                return self._pending_order
+            # 取消中，无挂单
+            if not self._pending_order or not self._pending_order.is_active():
+                self.status = OrderCmdStatus.FINISHED
+                self._notify_change()
+            return None
+
+        #2. 运行中处理
         # 检查总超时
         if self.started_at is not None:
             elapsed = now - self.started_at
-            if elapsed.total_seconds() >= self.total_timeout:
-                self._finish("超时指令")
-                # 指令超时，撤单并将剩余重试次数设为0
-                if self._pending_order and self._pending_order.is_active():
-                    return self._pending_order
+            if elapsed.total_seconds() >= self.cmd_timeout:
+                self._cancel("超时指令")
 
         # 检查是否完成
         if self.filled_volume >= self.volume:
-            self._finish("全部完成")
-            if self._pending_order and self._pending_order.is_active():
-                return self._pending_order
+            self._cancel("全部完成")
 
         # 检查当前报单是否超时
-        if self._pending_order and self._pending_order.is_active():
+        if self._pending_order and self._pending_order.can_cancel():
             insert_time = self._pending_order.insert_time
             if insert_time is not None:
                 elapsed = now - insert_time
                 if elapsed.total_seconds() >= self.order_timeout:
                     return self._pending_order
 
-        # 处理待重试的手数
+        # 重试处理
         if self._left_retry_times > 0:
             # 处理下一个拆单
             split_order = self._load_next_split_order()
-            if split_order is not None:
+            if split_order and not self._pending_order:
                 # 控制拆单报单时间
                 if (
                     self._last_order_time is None
@@ -285,13 +292,9 @@ class OrderCmd:
 
     def close(self) -> None:
         """关闭指令（取消）"""
-        if self.is_finished:
+        if self.status in [OrderCmdStatus.FINISHED, OrderCmdStatus.CANCELING]:
             return
-        self.status = OrderCmdStatus.FINISHED
-        self.finish_reason = "指令已取消"
-        self.finished_at = datetime.now()
-        self._left_retry_times = 0
-        logger.info(f"指令已取消: {self.cmd_id}")
+        self._cancel("指令已取消")
 
     def get_pending_order(self) -> Optional[OrderData]:
         """获取当前挂单"""
@@ -332,12 +335,6 @@ class OrderCmd:
 
         # 订单完成后清理
         self._pending_order = None
-
-        if order.status == OrderStatus.REJECTED:
-            self._left_retry_times = 0
-            self._finish(f"订单被拒：{order.status_msg}")
-            return
-
         traded = order.traded if order.traded is not None else 0
         if traded > 0:
             # 更新报单指令
@@ -354,30 +351,40 @@ class OrderCmd:
             if self._cur_split_order is not None:
                 self._cur_split_order.volume -= traded
 
-        if self.on_change:
-            self.on_change(self)
+        if order.status == OrderStatus.REJECTED:
+            self._left_retry_times = 0
+            self._cancel(f"报单被拒：{order.status_msg}")
 
+        self._notify_change()
     def _handle_trade_update(self, trade: TradeData) -> None:
         """处理成交更新（成交统计已由订单更新处理）"""
         # 成交统计已在 _handle_order_update 中通过 traded 和 traded_price 完成
         # 这里只做完成检查
         pass
 
-    def _finish(self, reason: str) -> None:
+    def _cancel(self, reason: str) -> None:
         """结束指令"""
-        if self.status == OrderCmdStatus.FINISHED:
+        if self.status == OrderCmdStatus.FINISHED or self.status == OrderCmdStatus.CANCELING:
+            #指令已完成或者取消中
             return
 
-        self.status = OrderCmdStatus.FINISHED
-        self.finish_reason = reason
-        self.finished_at = datetime.now()
-        self._left_retry_times = 0
+        # 检查是否有未完成的挂单
+        if self._pending_order and self._pending_order.is_active():
+            # 有挂单需要撤销，进入取消中状态
+            self.status = OrderCmdStatus.CANCELING
+        else:
+            # 无挂单，直接完成
+            self.status = OrderCmdStatus.FINISHED
+            self.finished_at = datetime.now()
 
-        pending_count = 1 if self._pending_order else 0
+        self.finish_reason = reason
+        self._left_retry_times = 0   
+        self._notify_change()
+    
+    def _notify_change(self) -> None:
+        """通知指令状态变更"""
         logger.info(
-            f"指令结束: 原因={reason} "
-            f"目标={self.volume} 成交={self.filled_volume} "
-            f"均价={self.filled_price:.2f}, 挂单={pending_count}"
+            f"指令结束: 原因={self.finish_reason} 目标={self.volume} 成交={self.filled_volume} 均价={self.filled_price:.2f},  状态={self.status},已报单次数={len(self.all_order_ids)}"
         )
         if self.on_change:
             self.on_change(self)
@@ -389,13 +396,13 @@ class OrderCmd:
 
     @property
     def is_active(self) -> bool:
-        """是否活跃"""
-        return self.status != OrderCmdStatus.FINISHED
+        """是否活跃（CANCELING状态也视为活跃，因为有挂单需要撤销）"""
+        return self.status not in [OrderCmdStatus.FINISHED]
 
     @property
     def is_finished(self) -> bool:
         """是否完成(状态完成且没有挂单)"""
-        return self.status == OrderCmdStatus.FINISHED and self._pending_order is None
+        return self.status == OrderCmdStatus.FINISHED
 
     def to_dict(self) -> dict:
         """转换为字典"""

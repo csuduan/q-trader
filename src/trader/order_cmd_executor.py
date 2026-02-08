@@ -1,7 +1,7 @@
 """
-报单指令执行器模块
+报单指令执行器模块（异步版本）
 
-提供单线程执行器，统一管理所有 OrderCmd 状态机。
+提供异步执行器，统一管理所有 OrderCmd 状态机。
 职责：
 - 订阅全局事件 (ORDER_UPDATE, TRADE_UPDATE)
 - 主循环: 定期遍历所有 cmd，检查并执行报单
@@ -10,7 +10,7 @@
 - 生命周期: 注册即启动，close() 关闭
 """
 
-import math
+import asyncio
 import threading
 import time
 from datetime import datetime
@@ -26,6 +26,7 @@ from src.models.object import (
     TradeData,
 )
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus
+from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
 
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 
 class OrderCmdExecutor:
     """
-    单线程执行器，管理所有 OrderCmd 状态机
+    异步报单指令执行器，管理所有 OrderCmd 状态机
 
     功能：
     - 订阅全局事件 (ORDER_UPDATE, TRADE_UPDATE)
@@ -45,12 +46,12 @@ class OrderCmdExecutor:
     - 生命周期: 注册即启动，close() 关闭
 
     性能优势：
-    - 100+ OrderCmd 只需 1 个线程（原来需要 100+ 线程）
+    - 100+ OrderCmd 只需 1 个异步任务（原来需要 100+ 线程）
     - 内存占用从 ~800MB 降至 ~8MB
     - 上下文切换开销降低 ~90%
     """
 
-    def __init__(self, event_engine: EventEngine, trading_engine: "TradingEngine"):
+    def __init__(self, event_engine: AsyncEventEngine, trading_engine: "TradingEngine"):
         self.logger = get_logger("OrderCmdExecutor")
         self._event_engine = event_engine
         self._trading_engine = trading_engine
@@ -61,7 +62,8 @@ class OrderCmdExecutor:
 
         # 控制参数
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 统计
         self._trig_count = 0
@@ -74,35 +76,42 @@ class OrderCmdExecutor:
             return
 
         self._running = True
+        self._loop = asyncio.get_running_loop()
 
         # 订阅全局事件（只订阅一次）
         self._event_engine.register(EventTypes.ORDER_UPDATE, self._on_order_update)
         self._event_engine.register(EventTypes.TRADE_UPDATE, self._on_trade_update)
 
         # 启动主循环
-        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="OrderCmdExecutor")
-        self._thread.start()
+        self._task = asyncio.create_task(self._run_loop())
         self.logger.info("OrderCmdExecutor执行器已启动")
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """停止执行器"""
         if not self._running:
             return
 
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2)
+
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
         self.logger.info("执行器已停止")
 
-    def register(self, cmd: "OrderCmd") -> None:
+    async def register(self, cmd: "OrderCmd") -> None:
         """
         注册 OrderCmd - 注册即启动
 
         Args:
             cmd: OrderCmd 实例
         """
-        # 订阅合约行情
-        self._trading_engine.subscribe_symbol(cmd.symbol)
+        # 订阅合约行情（异步）
+        #asyncio.create_task()
+        await self._trading_engine.subscribe_symbol(cmd.symbol)
 
         # 设置为运行状态
         cmd.status = OrderCmdStatus.RUNNING
@@ -145,7 +154,7 @@ class OrderCmdExecutor:
         # 触发状态变更事件 (PENDING -> RUNNING)
         self._emit_cmd_update(cmd)
 
-    def close(self, cmd_id: str) -> bool:
+    async def close(self, cmd_id: str) -> bool:
         """
         关闭 OrderCmd（取消）
 
@@ -156,13 +165,14 @@ class OrderCmdExecutor:
             是否成功
         """
         cmd = self._pending_cmds.get(cmd_id)
+        # 只允许关闭活跃状态的指令（RUNNING状态）
         if not cmd or cmd.status != OrderCmdStatus.RUNNING:
             return False
 
-        # 撤销所有活动订单
+        # 撤销所有活动订单（异步）
         pending_order = cmd.get_pending_order()
         if pending_order:
-            self._trading_engine.cancel_order(pending_order.order_id)
+            await self._trading_engine.cancel_order(pending_order.order_id)
 
         # 设置为关闭状态
         old_status = cmd.status
@@ -208,8 +218,8 @@ class OrderCmdExecutor:
         """触发指令状态变更事件"""
         self._trading_engine._emit_cmd_update_event(cmd)
 
-    def _run_loop(self) -> None:
-        """主执行循环"""
+    async def _run_loop(self) -> None:
+        """主执行循环（异步版本）"""
         self.logger.info("执行器主循环启动")
         self._last_stats_time = time.time()
 
@@ -217,7 +227,7 @@ class OrderCmdExecutor:
             try:
                 # 遍历所有 cmd，检查并执行报单
                 if len(self._pending_cmds) == 0:
-                    time.sleep(0.1)
+                    await asyncio.sleep(0.1)
                     continue
                 remove_list = []
                 for cmd_id, cmd in self._pending_cmds.items():
@@ -226,7 +236,7 @@ class OrderCmdExecutor:
                         remove_list.append(cmd_id)
                     else:
                         try:
-                            self._process_cmd(cmd)
+                            await self._process_cmd(cmd)
                         except Exception as e:
                             self.logger.exception(f"cmd 处理失败 {cmd_id}: {e}")
 
@@ -235,30 +245,27 @@ class OrderCmdExecutor:
                     self._pending_cmds.pop(cmd_id, None)
 
                 # 定期输出统计
-                self._maybe_log_stats()
+                await self._maybe_log_stats()
             except Exception as e:
                 self.logger.exception(f"执行循环异常: {e}")
-
+            await asyncio.sleep(0)
         self.logger.info("执行器主循环退出")
 
-    def _process_cmd(self, cmd: "OrderCmd") -> None:
+    async def _process_cmd(self, cmd: "OrderCmd") -> None:
         """
         处理单个 OrderCmd 的 tick
 
         Args:
             cmd: OrderCmd 实例
         """
-        # 查询当前持仓（用于平仓指令）
-        position = self._trading_engine.positions.get(cmd.symbol) if self._trading_engine else None
-
         # 获取待下单请求（传递持仓信息）
-        req = cmd.trig(position)
+        req = cmd.trig()
         if not req:
             return
         if isinstance(req, OrderRequest):
-            # 报单
+            # 报单（异步）
             try:
-                order = self._trading_engine.insert_order(
+                order = await self._trading_engine.insert_order(
                     symbol=req.symbol,
                     direction=req.direction,
                     offset=req.offset,
@@ -270,13 +277,14 @@ class OrderCmdExecutor:
             except Exception as e:
                 self.logger.error(f"下单失败 {cmd.cmd_id}: {e}")
         elif isinstance(req, OrderData):
-            # 撤单
+            # 撤单（异步）
             try:
-                self._trading_engine.cancel_order(req.order_id)
+                await self._trading_engine.cancel_order(req.order_id)
+                req.canceled = True
             except Exception as e:
                 self.logger.error(f"撤单失败 {req.order_id}: {e}")
 
-    def _maybe_log_stats(self) -> None:
+    async def _maybe_log_stats(self) -> None:
         """定期输出统计信息"""
         now = time.time()
         if now - self._last_stats_time >= 60:  # 每分钟一次

@@ -62,7 +62,10 @@ class AppContext:
 
     # 便捷获取方法
     def get_event_engine(self) -> Optional[Any]:
-        """获取事件引擎"""
+        """
+        获取事件引擎
+        优先返回 AsyncEventEngine，如果不存在则返回同步 EventEngine
+        """
         return self.get(self.KEY_EVENT_ENGINE)
 
     def get_event_loop(self) -> Optional[Any]:

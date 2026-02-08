@@ -13,6 +13,7 @@ export interface ApiResponse<T = any> {
 export interface Account {
   id: number
   account_id: string
+  broker_type: string | null
   broker_name: string | null
   currency: string
   balance: number
@@ -376,6 +377,14 @@ export interface StrategyConfig {
   params?: Record<string, any>
 }
 
+/** 参数定义 */
+export interface ParamDefinition {
+  key: string
+  label: string
+  type: 'string' | 'int' | 'float' | 'bool' | 'time'
+  value: any
+}
+
 /** 策略状态 */
 export interface StrategyRes {
   strategy_id: string
@@ -384,7 +393,11 @@ export interface StrategyRes {
   inited: boolean
   config: StrategyConfig
   params?: StrategyParams
+  base_params?: ParamDefinition[]
+  ext_params?: ParamDefinition[]
   signal?: StrategySignalData
+  pos_volume: number  // 当前持仓量
+  pos_price: number | null  // 当前持仓均价
   trading_status?: string
   opening_paused?: boolean
   closing_paused?: boolean

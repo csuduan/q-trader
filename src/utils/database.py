@@ -1,7 +1,9 @@
 """
-数据库操作模块
+数据库操作模块（同步版本，向后兼容）
 提供数据库连接、会话管理和初始化功能
 每个Trader进程管理一个独立的数据库
+
+注意：新项目应使用 src.utils.async_database 中的异步版本
 """
 
 from contextlib import contextmanager

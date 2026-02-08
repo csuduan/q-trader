@@ -201,10 +201,10 @@
             <div class="card-header">
               <span>报单指令</span>
               <el-space>
-                <el-select v-model="orderCmdStatus" placeholder="状态" style="width: 120px">
-                  <el-option label="未完成" value="active" />
-                  <el-option label="已完成" value="finished" />
-                </el-select>
+                <el-radio-group v-model="orderCmdStatus" size="small">
+                  <el-radio-button label="active">未完成</el-radio-button>
+                  <el-radio-button label="finished">已完成</el-radio-button>
+                </el-radio-group>
                 <el-button type="primary" @click="loadOrderCmdData" :loading="loading">
                   <el-icon><Refresh /></el-icon>
                   刷新
