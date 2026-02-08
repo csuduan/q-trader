@@ -36,6 +36,9 @@ class BrokerConfig(BaseModel):
     broker_name: str = ""
     user_id: str = ""
     password: str = ""
+    app_id: str = ""
+    auth_code: str = ""
+    url: str = ""
 
 
 class RiskControlConfig(BaseModel):

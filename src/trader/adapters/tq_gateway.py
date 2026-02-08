@@ -10,7 +10,7 @@ import time
 from typing import Any, Dict, List, Optional, Set, Union
 
 from pandas import DataFrame
-from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqSim, data_extension
+from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqSim, data_extension,TqRohon
 from tqsdk.datetime import _get_trading_day_from_timestamp
 from tqsdk.objs import Account, Order, Position, Quote, Trade
 from contextlib import closing
@@ -121,6 +121,15 @@ class TqGateway(BaseGateway):
                     broker_id=self.config.broker.broker_name if self.config.broker else "",
                     account_id=self.config.broker.user_id if self.config.broker else "",
                     password=self.config.broker.password if self.config.broker else "",
+                )
+            elif broker_type == "rohon":
+                account = TqRohon(
+                    front_broker=self.config.broker.broker_name if self.config.broker else "",
+                    account_id=self.config.broker.user_id if self.config.broker else "",
+                    password=self.config.broker.password if self.config.broker else "",
+                    app_id=self.config.broker.app_id if self.config.broker else "",
+                    auth_code=self.config.broker.auth_code if self.config.broker else "",
+                    front_url=self.config.broker.url if self.config.broker else "",
                 )
             else:  # sim
                 account = TqSim()
